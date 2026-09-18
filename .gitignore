@@ -1,5 +1,5 @@
 # IDE state
-/.vs/
+/Project/.vs/
 *.suo
 *.user
 *.sln.docstates
