@@ -1,0 +1,19 @@
+# IDE state
+/.vs/
+*.suo
+*.user
+*.sln.docstates
+*.nvuser
+
+# Premake-generated projects
+/Project/*.sln
+/Project/*.slnx
+/Project/*.vcxproj
+/Project/*.vcxproj.filters
+
+# Build outputs
+/generated/
+
+# Runtime state
+/Project/Logs/
+/Project/imgui.ini

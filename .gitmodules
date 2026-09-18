@@ -1,0 +1,3 @@
+[submodule "Dependencies/LaziealGraphicsFramework"]
+	path = Dependencies/LaziealGraphicsFramework
+	url = ../LaziealGraphicsFramework
