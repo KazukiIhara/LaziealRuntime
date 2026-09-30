@@ -42,6 +42,9 @@ namespace LGF::Collision {
 	std::optional<Contact> Collide(const AABB& first, const AABB& second);
 	std::optional<Contact> Collide(const Capsule& capsule, const Sphere& sphere);
 	std::optional<Contact> Collide(const Sphere& sphere, const Capsule& capsule);
+	std::optional<Contact> Collide(const Capsule& capsule, const AABB& box);
+	std::optional<Contact> Collide(const AABB& box, const Capsule& capsule);
+	std::optional<Contact> Collide(const Capsule& first, const Capsule& second);
 
 	bool Intersects(const Sphere& first, const Sphere& second);
 	bool Intersects(const Sphere& sphere, const AABB& box);
@@ -49,6 +52,9 @@ namespace LGF::Collision {
 	bool Intersects(const AABB& first, const AABB& second);
 	bool Intersects(const Capsule& capsule, const Sphere& sphere);
 	bool Intersects(const Sphere& sphere, const Capsule& capsule);
+	bool Intersects(const Capsule& capsule, const AABB& box);
+	bool Intersects(const AABB& box, const Capsule& capsule);
+	bool Intersects(const Capsule& first, const Capsule& second);
 
 	std::optional<RaycastHit> Raycast(
 		const Ray& ray,
@@ -61,6 +67,10 @@ namespace LGF::Collision {
 	std::optional<RaycastHit> Raycast(
 		const Ray& ray,
 		const Plane& plane,
+		float maxDistance = std::numeric_limits<float>::infinity());
+	std::optional<RaycastHit> Raycast(
+		const Ray& ray,
+		const Capsule& capsule,
 		float maxDistance = std::numeric_limits<float>::infinity());
 
 }

@@ -4,9 +4,11 @@
 #include "LGF/Math/MathConstants.h"
 
 #include <algorithm>
+#include <array>
 #include <cstddef>
 #include <cmath>
 #include <iterator>
+#include <limits>
 
 namespace {
 
@@ -30,6 +32,166 @@ namespace {
 			.normal = Reverse(contact.normal),
 			.penetrationDepth = contact.penetrationDepth,
 		};
+	}
+
+	float GetComponent(const Vector3& value, std::size_t index) {
+		switch (index) {
+		case 0u:
+			return value.x;
+		case 1u:
+			return value.y;
+		default:
+			return value.z;
+		}
+	}
+
+	struct SegmentClosestPoints final {
+		Vector3 first{};
+		Vector3 second{};
+	};
+
+	SegmentClosestPoints ClosestPointsBetweenSegments(
+		const Vector3& firstStart,
+		const Vector3& firstEnd,
+		const Vector3& secondStart,
+		const Vector3& secondEnd) {
+		const Vector3 firstDirection = firstEnd - firstStart;
+		const Vector3 secondDirection = secondEnd - secondStart;
+		const Vector3 offset = firstStart - secondStart;
+		const float firstLengthSq = Math::LengthSq(firstDirection);
+		const float secondLengthSq = Math::LengthSq(secondDirection);
+		const float secondProjection = Math::Dot(secondDirection, offset);
+
+		float firstT = 0.0f;
+		float secondT = 0.0f;
+		if (firstLengthSq <= Math::EPSILON * Math::EPSILON &&
+			secondLengthSq <= Math::EPSILON * Math::EPSILON) {
+			return { firstStart, secondStart };
+		}
+
+		if (firstLengthSq <= Math::EPSILON * Math::EPSILON) {
+			secondT = std::clamp(secondProjection / secondLengthSq, 0.0f, 1.0f);
+		} else {
+			const float firstProjection = Math::Dot(firstDirection, offset);
+			if (secondLengthSq <= Math::EPSILON * Math::EPSILON) {
+				firstT = std::clamp(-firstProjection / firstLengthSq, 0.0f, 1.0f);
+			} else {
+				const float directionsDot = Math::Dot(firstDirection, secondDirection);
+				const float denominator =
+					firstLengthSq * secondLengthSq - directionsDot * directionsDot;
+				if (std::abs(denominator) > Math::EPSILON) {
+					firstT = std::clamp(
+						(directionsDot * secondProjection -
+							firstProjection * secondLengthSq) / denominator,
+						0.0f,
+						1.0f);
+				}
+
+				secondT =
+					(directionsDot * firstT + secondProjection) / secondLengthSq;
+				if (secondT < 0.0f) {
+					secondT = 0.0f;
+					firstT = std::clamp(-firstProjection / firstLengthSq, 0.0f, 1.0f);
+				} else if (secondT > 1.0f) {
+					secondT = 1.0f;
+					firstT = std::clamp(
+						(directionsDot - firstProjection) / firstLengthSq,
+						0.0f,
+						1.0f);
+				}
+			}
+		}
+
+		return {
+			firstStart + firstDirection * firstT,
+			secondStart + secondDirection * secondT,
+		};
+	}
+
+	SegmentClosestPoints ClosestPointsBetweenSegmentAndAABB(
+		const Vector3& start,
+		const Vector3& end,
+		const LGF::Collision::AABB& box) {
+		const Vector3 direction = end - start;
+		std::array<float, 8> breakpoints{};
+		std::size_t breakpointCount = 0u;
+		breakpoints[breakpointCount++] = 0.0f;
+		breakpoints[breakpointCount++] = 1.0f;
+
+		for (std::size_t axis = 0u; axis < 3u; ++axis) {
+			const float axisDirection = GetComponent(direction, axis);
+			if (std::abs(axisDirection) <= Math::EPSILON) {
+				continue;
+			}
+
+			const float axisStart = GetComponent(start, axis);
+			const float bounds[2]{
+				GetComponent(box.min, axis),
+				GetComponent(box.max, axis),
+			};
+			for (const float bound : bounds) {
+				const float t = (bound - axisStart) / axisDirection;
+				if (t > 0.0f && t < 1.0f) {
+					breakpoints[breakpointCount++] = t;
+				}
+			}
+		}
+
+		std::sort(breakpoints.begin(), breakpoints.begin() + breakpointCount);
+		float bestDistanceSq = std::numeric_limits<float>::infinity();
+		SegmentClosestPoints result{};
+		const auto evaluate = [&](float t) {
+			const Vector3 segmentPoint = start + direction * t;
+			const Vector3 boxPoint{
+				std::clamp(segmentPoint.x, box.min.x, box.max.x),
+				std::clamp(segmentPoint.y, box.min.y, box.max.y),
+				std::clamp(segmentPoint.z, box.min.z, box.max.z),
+			};
+			const float distanceSq = Math::DistanceSq(segmentPoint, boxPoint);
+			if (distanceSq < bestDistanceSq) {
+				bestDistanceSq = distanceSq;
+				result = { segmentPoint, boxPoint };
+			}
+		};
+
+		for (std::size_t index = 0u; index < breakpointCount; ++index) {
+			evaluate(breakpoints[index]);
+			if (index + 1u >= breakpointCount) {
+				continue;
+			}
+
+			const float intervalStart = breakpoints[index];
+			const float intervalEnd = breakpoints[index + 1u];
+			if (intervalEnd - intervalStart <= Math::EPSILON) {
+				continue;
+			}
+
+			const float midpoint = (intervalStart + intervalEnd) * 0.5f;
+			float quadratic = 0.0f;
+			float linear = 0.0f;
+			for (std::size_t axis = 0u; axis < 3u; ++axis) {
+				const float midpointValue =
+					GetComponent(start, axis) + GetComponent(direction, axis) * midpoint;
+				float bound = 0.0f;
+				if (midpointValue < GetComponent(box.min, axis)) {
+					bound = GetComponent(box.min, axis);
+				} else if (midpointValue > GetComponent(box.max, axis)) {
+					bound = GetComponent(box.max, axis);
+				} else {
+					continue;
+				}
+
+				const float axisDirection = GetComponent(direction, axis);
+				quadratic += axisDirection * axisDirection;
+				linear += axisDirection * (GetComponent(start, axis) - bound);
+			}
+
+			if (quadratic > Math::EPSILON * Math::EPSILON) {
+				evaluate(std::clamp(-linear / quadratic, intervalStart, intervalEnd));
+			}
+		}
+
+		return result;
 	}
 
 }
@@ -242,6 +404,86 @@ namespace LGF::Collision {
 		return contact ? std::optional<Contact>(ReverseContact(*contact)) : std::nullopt;
 	}
 
+	std::optional<Contact> Collide(const Capsule& capsule, const AABB& box) {
+		if (!IsValid(capsule) || !IsValid(box)) {
+			return std::nullopt;
+		}
+
+		const SegmentClosestPoints closest =
+			ClosestPointsBetweenSegmentAndAABB(capsule.start, capsule.end, box);
+		const Vector3 delta = closest.second - closest.first;
+		const float distanceSq = Math::LengthSq(delta);
+		if (distanceSq > capsule.radius * capsule.radius) {
+			return std::nullopt;
+		}
+
+		if (distanceSq > Math::EPSILON * Math::EPSILON) {
+			const float distance = std::sqrt(distanceSq);
+			return Contact{
+				.point = closest.second,
+				.normal = delta / distance,
+				.penetrationDepth = capsule.radius - distance,
+			};
+		}
+
+		const float distances[6]{
+			closest.first.x - box.min.x,
+			box.max.x - closest.first.x,
+			closest.first.y - box.min.y,
+			box.max.y - closest.first.y,
+			closest.first.z - box.min.z,
+			box.max.z - closest.first.z,
+		};
+		const Vector3 normals[6]{
+			{ -1.0f, 0.0f, 0.0f },
+			{ 1.0f, 0.0f, 0.0f },
+			{ 0.0f, -1.0f, 0.0f },
+			{ 0.0f, 1.0f, 0.0f },
+			{ 0.0f, 0.0f, -1.0f },
+			{ 0.0f, 0.0f, 1.0f },
+		};
+		const auto nearest = std::min_element(std::begin(distances), std::end(distances));
+		const std::size_t index = static_cast<std::size_t>(nearest - std::begin(distances));
+		return Contact{
+			.point = closest.first + normals[index] * *nearest,
+			.normal = normals[index],
+			.penetrationDepth = capsule.radius + *nearest,
+		};
+	}
+
+	std::optional<Contact> Collide(const AABB& box, const Capsule& capsule) {
+		const std::optional<Contact> contact = Collide(capsule, box);
+		return contact ? std::optional<Contact>(ReverseContact(*contact)) : std::nullopt;
+	}
+
+	std::optional<Contact> Collide(const Capsule& first, const Capsule& second) {
+		if (!IsValid(first) || !IsValid(second)) {
+			return std::nullopt;
+		}
+
+		const SegmentClosestPoints closest = ClosestPointsBetweenSegments(
+			first.start,
+			first.end,
+			second.start,
+			second.end);
+		const Vector3 delta = closest.second - closest.first;
+		const float radiusSum = first.radius + second.radius;
+		const float distanceSq = Math::LengthSq(delta);
+		if (distanceSq > radiusSum * radiusSum) {
+			return std::nullopt;
+		}
+
+		const float distance = std::sqrt(distanceSq);
+		const Vector3 normal = SafeNormal(delta, { 1.0f, 0.0f, 0.0f });
+		const float penetrationDepth = radiusSum - distance;
+		return Contact{
+			.point = closest.first + normal *
+				(first.radius - penetrationDepth * 0.5f),
+			.normal = normal,
+			.penetrationDepth = penetrationDepth,
+		};
+	}
+
 	bool Intersects(const Sphere& first, const Sphere& second) {
 		return Collide(first, second).has_value();
 	}
@@ -264,6 +506,18 @@ namespace LGF::Collision {
 
 	bool Intersects(const Sphere& sphere, const Capsule& capsule) {
 		return Intersects(capsule, sphere);
+	}
+
+	bool Intersects(const Capsule& capsule, const AABB& box) {
+		return Collide(capsule, box).has_value();
+	}
+
+	bool Intersects(const AABB& box, const Capsule& capsule) {
+		return Intersects(capsule, box);
+	}
+
+	bool Intersects(const Capsule& first, const Capsule& second) {
+		return Collide(first, second).has_value();
 	}
 
 	std::optional<RaycastHit> Raycast(
@@ -391,6 +645,77 @@ namespace LGF::Collision {
 			.normal = normal,
 			.distance = distance,
 		};
+	}
+
+	std::optional<RaycastHit> Raycast(
+		const Ray& ray,
+		const Capsule& capsule,
+		float maxDistance) {
+		if (!IsValid(ray) || !IsValid(capsule) || maxDistance < 0.0f) {
+			return std::nullopt;
+		}
+
+		const Vector3 direction = Math::Normalize(ray.direction);
+		if (Contains(capsule, ray.origin)) {
+			const Vector3 closest = ClosestPoint(ray.origin, capsule);
+			return RaycastHit{
+				.point = ray.origin,
+				.normal = SafeNormal(ray.origin - closest, Reverse(direction)),
+				.distance = 0.0f,
+			};
+		}
+
+		const Vector3 axis = capsule.end - capsule.start;
+		const float axisLengthSq = Math::LengthSq(axis);
+		if (axisLengthSq <= Math::EPSILON * Math::EPSILON) {
+			return Raycast(ray, Sphere{ capsule.start, capsule.radius }, maxDistance);
+		}
+
+		std::optional<RaycastHit> nearestHit;
+		const Vector3 originOffset = ray.origin - capsule.start;
+		const float axisRay = Math::Dot(axis, direction);
+		const float axisOrigin = Math::Dot(axis, originOffset);
+		const float rayOrigin = Math::Dot(direction, originOffset);
+		const float originLengthSq = Math::LengthSq(originOffset);
+		const float quadratic = axisLengthSq - axisRay * axisRay;
+		const float linear = axisLengthSq * rayOrigin - axisOrigin * axisRay;
+		const float constant = axisLengthSq * originLengthSq -
+			axisOrigin * axisOrigin - capsule.radius * capsule.radius * axisLengthSq;
+		const float discriminant = linear * linear - quadratic * constant;
+		if (quadratic > Math::EPSILON * Math::EPSILON && discriminant >= 0.0f) {
+			const float distance = (-linear - std::sqrt(discriminant)) / quadratic;
+			const float axisPosition = axisOrigin + distance * axisRay;
+			if (distance >= 0.0f && distance <= maxDistance &&
+				axisPosition > 0.0f && axisPosition < axisLengthSq) {
+				const Vector3 point = ray.origin + direction * distance;
+				const Vector3 axisPoint =
+					capsule.start + axis * (axisPosition / axisLengthSq);
+				nearestHit = RaycastHit{
+					.point = point,
+					.normal = SafeNormal(point - axisPoint, Reverse(direction)),
+					.distance = distance,
+				};
+			}
+		}
+
+		const auto considerCap = [&](const Vector3& center, bool isStart) {
+			const std::optional<RaycastHit> hit =
+				Raycast(ray, Sphere{ center, capsule.radius }, maxDistance);
+			if (!hit) {
+				return;
+			}
+
+			const float axisPosition = Math::Dot(hit->point - capsule.start, axis);
+			const bool isOnHemisphere = isStart
+				? axisPosition <= 0.0f
+				: axisPosition >= axisLengthSq;
+			if (isOnHemisphere && (!nearestHit || hit->distance < nearestHit->distance)) {
+				nearestHit = hit;
+			}
+		};
+		considerCap(capsule.start, true);
+		considerCap(capsule.end, false);
+		return nearestHit;
 	}
 
 }
