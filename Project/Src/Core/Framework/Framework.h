@@ -1,6 +1,9 @@
 #pragma once
 
+#include <cstdint>
 #include <memory>
+#include <string>
+#include <string_view>
 
 namespace LGF {
 
@@ -23,6 +26,14 @@ namespace LGF {
 		bool Finalize();
 
 		double GetDeltaTime() const;
+		bool SetWindowTitle(std::wstring_view title);
+		bool ResizeWindow(uint32_t width, uint32_t height);
+		bool SetWindowFullscreen(bool fullscreen);
+		bool ToggleWindowFullscreen();
+		uint32_t GetWindowWidth() const;
+		uint32_t GetWindowHeight() const;
+		std::wstring GetWindowTitle() const;
+		bool IsWindowFullscreen() const;
 
 	private:
 		void BeginFrame();

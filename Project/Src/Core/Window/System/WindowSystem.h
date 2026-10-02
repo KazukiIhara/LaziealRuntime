@@ -1,6 +1,6 @@
 #pragma once
 
-#include "Core/Window/Window.h"
+#include "Core/Window/Win32Window.h"
 
 namespace LGF {
 	struct WindowConfig;
@@ -18,12 +18,12 @@ namespace LGF {
 
 		void ProcessMessage();
 
-		Window& GetWindow();
+		Win32Window& GetWindow();
 
 		bool IsCloseRequested() const;
 
 	private:
-		Window window_;
+		Win32Window window_;
 		bool isCloseRequested_ = false;
 	};
 }

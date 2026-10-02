@@ -1,10 +1,10 @@
 #include "Framework.h"
 
+#include "Core/Config/RuntimeConfig.h"
 #include "Core/Time/TimeSystem.h"
 #include "Core/Window/System/WindowSystem.h"
 #include "Input/System/InputSystem.h"
 #include "LGF/Graphics/GraphicsSystem.h"
-#include "LGF/Runtime.h"
 
 using namespace LGF;
 
@@ -18,8 +18,8 @@ bool Framework::Initialize(const RuntimeConfig& config) {
 		return false;
 	}
 
-	Window& window = windowSystem_->GetWindow();
-	const Window::Setting windowSetting = window.GetWndSetting();
+	Win32Window& window = windowSystem_->GetWindow();
+	const Win32Window::Setting windowSetting = window.GetWndSetting();
 
 	inputSystem_ = std::make_unique<InputSystem>();
 	if (!inputSystem_->Initialize(window.GetHwnd())) {
@@ -76,9 +76,9 @@ bool Framework::Update() {
 		return false;
 	}
 
-	Window& window = windowSystem_->GetWindow();
+	Win32Window& window = windowSystem_->GetWindow();
 	if (window.IsResized()) {
-		const Window::Setting setting = window.GetWndSetting();
+		const Win32Window::Setting setting = window.GetWndSetting();
 		if (!graphicsSystem_->Resize(setting.wndSize.width, setting.wndSize.height)) {
 			return false;
 		}
@@ -101,7 +101,7 @@ bool Framework::Finalize() {
 		succeeded = timeSystem_->Finalize() && succeeded;
 	}
 	if (windowSystem_) {
-		Window& window = windowSystem_->GetWindow();
+		Win32Window& window = windowSystem_->GetWindow();
 		window.SetRawInputHandler({});
 		window.SetMessageHandler({});
 	}
@@ -124,6 +124,46 @@ bool Framework::Finalize() {
 
 double Framework::GetDeltaTime() const {
 	return timeSystem_ ? timeSystem_->GetDeltaTime() : 0.0;
+}
+
+bool Framework::SetWindowTitle(std::wstring_view title) {
+	return windowSystem_ && windowSystem_->GetWindow().SetTitle(title);
+}
+
+bool Framework::ResizeWindow(uint32_t width, uint32_t height) {
+	return windowSystem_ && windowSystem_->GetWindow().Resize(width, height);
+}
+
+bool Framework::SetWindowFullscreen(bool fullscreen) {
+	if (!windowSystem_) {
+		return false;
+	}
+	windowSystem_->GetWindow().SetFullscreen(fullscreen);
+	return true;
+}
+
+bool Framework::ToggleWindowFullscreen() {
+	if (!windowSystem_) {
+		return false;
+	}
+	windowSystem_->GetWindow().ToggleFullScreen();
+	return true;
+}
+
+uint32_t Framework::GetWindowWidth() const {
+	return windowSystem_ ? windowSystem_->GetWindow().GetSize().width : 0u;
+}
+
+uint32_t Framework::GetWindowHeight() const {
+	return windowSystem_ ? windowSystem_->GetWindow().GetSize().height : 0u;
+}
+
+std::wstring Framework::GetWindowTitle() const {
+	return windowSystem_ ? windowSystem_->GetWindow().GetTitle() : std::wstring{};
+}
+
+bool Framework::IsWindowFullscreen() const {
+	return windowSystem_ && windowSystem_->GetWindow().IsFullscreen();
 }
 
 void Framework::BeginFrame() {

@@ -1,16 +1,17 @@
-#include "Window.h"
+#include "Win32Window.h"
 
+#include <limits>
 #include <utility>
 
 using namespace LGF;
 
-Window::Window() {
+Win32Window::Win32Window() {
 }
 
-Window::~Window() {
+Win32Window::~Win32Window() {
 }
 
-bool Window::Initialize(const Window::Setting& setting) {
+bool Win32Window::Initialize(const Setting& setting) {
 	// 設定を取得
 	setting_ = setting;
 	const bool startFullscreen = setting_.isFullScreen;
@@ -59,7 +60,7 @@ bool Window::Initialize(const Window::Setting& setting) {
 	return true;
 }
 
-bool Window::Finalize() {
+bool Win32Window::Finalize() {
 	// ウィンドウを破棄
 	if (hwnd_ != nullptr) {
 		DestroyWindow(hwnd_);
@@ -83,7 +84,7 @@ bool Window::Finalize() {
 	return true;
 }
 
-bool Window::ProcessMessage() {
+bool Win32Window::ProcessMessage() {
 	// メッセージ
 	MSG msg{};
 
@@ -102,27 +103,75 @@ bool Window::ProcessMessage() {
 	return true;
 }
 
-HWND Window::GetHwnd() const {
+HWND Win32Window::GetHwnd() const {
 	return hwnd_;
 }
 
-WNDCLASS Window::GetWndClass() const {
+WNDCLASS Win32Window::GetWndClass() const {
 	return wc_;
 }
 
-Window::Setting Window::GetWndSetting() const {
+Win32Window::Setting Win32Window::GetWndSetting() const {
 	return setting_;
 }
 
-bool Window::IsResized() const {
+bool Win32Window::IsResized() const {
 	return isResized_;
 }
 
-void Window::ClearResizeFlag() {
+void Win32Window::ClearResizeFlag() {
 	isResized_ = false;
 }
 
-void Window::ToggleFullScreen() {
+bool Win32Window::SetTitle(std::wstring_view title) {
+	if (hwnd_ == nullptr) {
+		return false;
+	}
+
+	const std::wstring ownedTitle(title);
+	if (SetWindowTextW(hwnd_, ownedTitle.c_str()) == FALSE) {
+		return false;
+	}
+	setting_.wndName = ownedTitle;
+	return true;
+}
+
+bool Win32Window::Resize(uint32_t width, uint32_t height) {
+	if (hwnd_ == nullptr || width == 0u || height == 0u ||
+		width > static_cast<uint32_t>(std::numeric_limits<LONG>::max()) ||
+		height > static_cast<uint32_t>(std::numeric_limits<LONG>::max()) ||
+		setting_.isFullScreen) {
+		return false;
+	}
+
+	RECT windowRect{
+		.left = 0,
+		.top = 0,
+		.right = static_cast<LONG>(width),
+		.bottom = static_cast<LONG>(height),
+	};
+	const DWORD windowStyle = static_cast<DWORD>(GetWindowLongPtr(hwnd_, GWL_STYLE));
+	if (AdjustWindowRect(&windowRect, windowStyle, FALSE) == FALSE) {
+		return false;
+	}
+
+	return SetWindowPos(
+		hwnd_,
+		nullptr,
+		0,
+		0,
+		windowRect.right - windowRect.left,
+		windowRect.bottom - windowRect.top,
+		SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE) != FALSE;
+}
+
+void Win32Window::SetFullscreen(bool fullscreen) {
+	if (setting_.isFullScreen != fullscreen) {
+		ToggleFullScreen();
+	}
+}
+
+void Win32Window::ToggleFullScreen() {
 	// 無効なウィンドウは処理しない
 	if (hwnd_ == nullptr) {
 		return;
@@ -178,15 +227,27 @@ void Window::ToggleFullScreen() {
 	}
 }
 
-void Window::SetRawInputHandler(RawInputHandler handler) {
+Win32Window::WndSize Win32Window::GetSize() const {
+	return setting_.wndSize;
+}
+
+std::wstring Win32Window::GetTitle() const {
+	return setting_.wndName;
+}
+
+bool Win32Window::IsFullscreen() const {
+	return setting_.isFullScreen;
+}
+
+void Win32Window::SetRawInputHandler(RawInputHandler handler) {
 	rawInputHandler_ = std::move(handler);
 }
 
-void Window::SetMessageHandler(MessageHandler handler) {
+void Win32Window::SetMessageHandler(MessageHandler handler) {
 	messageHandler_ = std::move(handler);
 }
 
-void Window::CreateGameWindow(int32_t clientWidth, int32_t clientHeight, const std::wstring& windowName, UINT windowStyle) {
+void Win32Window::CreateGameWindow(int32_t clientWidth, int32_t clientHeight, const std::wstring& windowName, UINT windowStyle) {
 	// ウィンドウクラス情報を設定
 	wc_ = {};
 
@@ -239,13 +300,13 @@ void Window::CreateGameWindow(int32_t clientWidth, int32_t clientHeight, const s
 
 }
 
-LRESULT Window::WindowProc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam) {
+LRESULT Win32Window::WindowProc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam) {
 	if (msg == WM_NCCREATE) {
 		const CREATESTRUCT* createStruct = reinterpret_cast<CREATESTRUCT*>(lparam);
 		SetWindowLongPtr(hwnd, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(createStruct->lpCreateParams));
 	}
 
-	Window* window = reinterpret_cast<Window*>(GetWindowLongPtr(hwnd, GWLP_USERDATA));
+	Win32Window* window = reinterpret_cast<Win32Window*>(GetWindowLongPtr(hwnd, GWLP_USERDATA));
 
 	if (msg == WM_INPUT && window != nullptr && window->rawInputHandler_) {
 		window->rawInputHandler_(reinterpret_cast<void*>(lparam));
@@ -276,7 +337,7 @@ LRESULT Window::WindowProc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam) {
 	return DefWindowProc(hwnd, msg, wparam, lparam);
 }
 
-void Window::OnResize(uint32_t width, uint32_t height) {
+void Win32Window::OnResize(uint32_t width, uint32_t height) {
 	if (width == 0 || height == 0) {
 		return;
 	}

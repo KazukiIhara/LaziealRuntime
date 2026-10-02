@@ -6,5 +6,5 @@
 /// エントリーポイント
 /// </summary>
 int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
-	return LGF::Run(ConfigureRuntime(), Main);
+	return LGF::Run(Main);
 }

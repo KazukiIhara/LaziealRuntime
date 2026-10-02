@@ -3,6 +3,7 @@
 #include <cstdint>
 #include <functional>
 #include <string>
+#include <string_view>
 #include <Windows.h>
 
 namespace LGF {
@@ -10,7 +11,7 @@ namespace LGF {
 	/// <summary>
 	/// ウィンドウクラス　
 	/// </summary>
-	class Window {
+	class Win32Window {
 	public:
 		using RawInputHandler = std::function<void(void*)>;
 		using MessageHandler = std::function<bool(HWND, UINT, WPARAM, LPARAM)>;
@@ -26,10 +27,10 @@ namespace LGF {
 			bool isFullScreen = false;
 		};
 	public:
-		Window();
-		~Window();
+		Win32Window();
+		~Win32Window();
 
-		bool Initialize(const Window::Setting& setting = Window::Setting{});
+		bool Initialize(const Setting& setting = Setting{});
 		bool Finalize();
 
 		// メッセージの処理
@@ -40,12 +41,18 @@ namespace LGF {
 		// ウィンドウクラスの取得
 		WNDCLASS GetWndClass() const;
 		// ウィンドウサイズの取得
-		Window::Setting GetWndSetting()const;
+		Setting GetWndSetting()const;
 		bool IsResized()const;
 		void ClearResizeFlag();
+		bool SetTitle(std::wstring_view title);
+		bool Resize(uint32_t width, uint32_t height);
+		void SetFullscreen(bool fullscreen);
 
 		// フルスクリーンモード切り替え
 		void ToggleFullScreen();
+		WndSize GetSize() const;
+		std::wstring GetTitle() const;
+		bool IsFullscreen() const;
 		void SetRawInputHandler(RawInputHandler handler);
 		void SetMessageHandler(MessageHandler handler);
 
@@ -65,7 +72,7 @@ namespace LGF {
 		// ウィンドウクラス
 		WNDCLASS wc_{};
 		// ウィンドウ設定
-		Window::Setting setting_;
+		Setting setting_;
 		bool isResized_ = false;
 		// ウィンドウモード時の位置とサイズ
 		RECT windowRect_{};
