@@ -70,10 +70,10 @@ namespace LGF {
 			code_(code) {
 		}
 
-		bool Trigger()const;
-		bool Press()const;
-		bool Release()const;
-		uint32_t PressedFrames()const;
+		bool Trigger() const;
+		bool Press() const;
+		bool Release() const;
+		uint32_t PressedFrames() const;
 
 	private:
 		KeyCode code_;
@@ -85,10 +85,10 @@ namespace LGF {
 			code_(code) {
 		}
 
-		bool Trigger()const;
-		bool Press()const;
-		bool Release()const;
-		uint32_t PressedFrames()const;
+		bool Trigger() const;
+		bool Press() const;
+		bool Release() const;
+		uint32_t PressedFrames() const;
 
 	private:
 		MouseButtonCode code_;

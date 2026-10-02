@@ -3,10 +3,11 @@
 #include "Core/Window/Win32Window.h"
 
 namespace LGF {
+
 	struct WindowConfig;
 
 	/// <summary>
-	/// ウィンドウ管理クラス
+	/// Win32ウィンドウのライフサイクルを管理する。
 	/// </summary>
 	class WindowSystem {
 	public:
@@ -19,7 +20,6 @@ namespace LGF {
 		void ProcessMessage();
 
 		Win32Window& GetWindow();
-
 		bool IsCloseRequested() const;
 
 	private:

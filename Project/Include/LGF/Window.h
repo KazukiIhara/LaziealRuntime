@@ -6,7 +6,7 @@
 
 namespace LGF::Window {
 
-	struct Size final {
+	struct Size {
 		uint32_t width = 0u;
 		uint32_t height = 0u;
 	};

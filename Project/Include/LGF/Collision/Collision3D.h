@@ -11,13 +11,13 @@ namespace LGF::Collision {
 	/// 2つの形状の接触情報。
 	/// normal は第1引数から第2引数へ向かう向きになる。
 	/// </summary>
-	struct Contact final {
+	struct Contact {
 		Vector3 point{};
 		Vector3 normal{};
 		float penetrationDepth = 0.0f;
 	};
 
-	struct RaycastHit final {
+	struct RaycastHit {
 		Vector3 point{};
 		Vector3 normal{};
 		float distance = 0.0f;

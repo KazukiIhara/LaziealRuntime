@@ -11,9 +11,9 @@ WindowSystem::~WindowSystem() = default;
 
 bool WindowSystem::Initialize(const WindowConfig& config) {
 	const Win32Window::Setting setting{
-		.wndSize = { config.width, config.height },
-		.wndName = config.title,
-		.isFullScreen = config.fullscreen,
+		.size = { config.width, config.height },
+		.title = config.title,
+		.fullscreen = config.fullscreen,
 	};
 	return window_.Initialize(setting);
 }

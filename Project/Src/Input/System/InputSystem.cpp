@@ -9,7 +9,10 @@ using namespace LGF;
 namespace {
 	InputSystem* g_inputSystem = nullptr;
 
-	void SetMouseButton(std::array<bool, static_cast<size_t>(MouseButtonCode::Count)>& buttons, MouseButtonCode code, bool isPressed) {
+	void SetMouseButton(
+		std::array<bool, static_cast<size_t>(MouseButtonCode::Count)>& buttons,
+		MouseButtonCode code,
+		bool isPressed) {
 		buttons[static_cast<size_t>(code)] = isPressed;
 	}
 }

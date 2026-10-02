@@ -131,7 +131,11 @@ std::optional<LGF::RuntimeConfig> LGF::LoadRuntimeConfig(
 			if (value.empty()) {
 				return std::nullopt;
 			}
-			config.assetRoot = std::filesystem::u8path(value.begin(), value.end());
+			const std::optional<std::wstring> assetRoot = Utf8ToWide(value);
+			if (!assetRoot) {
+				return std::nullopt;
+			}
+			config.assetRoot = *assetRoot;
 		} else if (section == "window" && key == "title") {
 			const std::optional<std::wstring> title = Utf8ToWide(value);
 			if (!title) {

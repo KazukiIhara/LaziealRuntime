@@ -4,17 +4,20 @@
 
 namespace LGF {
 
-	template<class State, class Data>
+	template <class State, class Data>
 	class SceneManager;
 
-	template<class State, class Data>
+	/// <summary>
+	/// SceneManagerで管理するシーンの基底クラス。
+	/// </summary>
+	template <class State, class Data>
 	class IScene {
 	public:
 		using StateType = State;
 		using DataType = Data;
 		using ManagerType = SceneManager<StateType, DataType>;
 
-		struct InitData final {
+		struct InitData {
 			StateType state;
 			std::shared_ptr<DataType> data;
 			ManagerType* manager = nullptr;

@@ -19,7 +19,7 @@ namespace LGF::Collision {
 
 	using ColliderShape = std::variant<Sphere, AABB, Capsule>;
 
-	struct ColliderHandle final {
+	struct ColliderHandle {
 		static constexpr uint32_t InvalidIndex = std::numeric_limits<uint32_t>::max();
 
 		uint32_t index = InvalidIndex;
@@ -29,7 +29,7 @@ namespace LGF::Collision {
 		bool operator==(const ColliderHandle&) const = default;
 	};
 
-	struct ColliderOptions final {
+	struct ColliderOptions {
 		CollisionLayerMask layer = 1u;
 		CollisionLayerMask mask = AllLayers;
 		bool isTrigger = false;
@@ -43,7 +43,7 @@ namespace LGF::Collision {
 		Exit,
 	};
 
-	struct CollisionEvent final {
+	struct CollisionEvent {
 		ColliderHandle first{};
 		ColliderHandle second{};
 		uint64_t firstUserData = 0u;
@@ -53,13 +53,13 @@ namespace LGF::Collision {
 		bool isTrigger = false;
 	};
 
-	struct WorldRaycastHit final {
+	struct WorldRaycastHit {
 		ColliderHandle collider{};
 		uint64_t userData = 0u;
 		RaycastHit hit{};
 	};
 
-	class ColliderWorld final {
+	class ColliderWorld {
 	public:
 		ColliderHandle Add(
 			const ColliderShape& shape,
@@ -103,21 +103,21 @@ namespace LGF::Collision {
 			CollisionLayerMask mask = AllLayers) const;
 
 	private:
-		struct Slot final {
+		struct Slot {
 			ColliderShape shape{};
 			ColliderOptions options{};
 			uint32_t generation = 1u;
 			bool occupied = false;
 		};
 
-		struct PairKey final {
+		struct PairKey {
 			ColliderHandle first{};
 			ColliderHandle second{};
 
 			bool operator<(const PairKey& other) const;
 		};
 
-		struct PairState final {
+		struct PairState {
 			Contact contact{};
 			uint64_t firstUserData = 0u;
 			uint64_t secondUserData = 0u;

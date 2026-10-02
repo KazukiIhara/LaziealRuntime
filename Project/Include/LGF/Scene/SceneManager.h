@@ -11,10 +11,13 @@
 
 namespace LGF {
 
-	struct EmptySceneData final {};
+	struct EmptySceneData {};
 
-	template<class State, class Data = EmptySceneData>
-	class SceneManager final {
+	/// <summary>
+	/// 状態をキーにシーンの生成と切り替えを管理する。
+	/// </summary>
+	template <class State, class Data = EmptySceneData>
+	class SceneManager {
 	public:
 		using Scene = IScene<State, Data>;
 		using InitData = typename Scene::InitData;
@@ -32,7 +35,7 @@ namespace LGF {
 		SceneManager(SceneManager&&) = delete;
 		SceneManager& operator=(SceneManager&&) = delete;
 
-		template<class SceneType>
+		template <class SceneType>
 		SceneManager& Register(const State& state) {
 			static_assert(
 				std::is_base_of_v<Scene, SceneType>,
@@ -135,7 +138,7 @@ namespace LGF {
 		std::optional<State> pendingState_;
 	};
 
-	template<class State, class Data>
+	template <class State, class Data>
 	bool IScene<State, Data>::ChangeScene(const StateType& state) {
 		return manager_ && manager_->Change(state);
 	}

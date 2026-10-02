@@ -45,7 +45,7 @@ namespace {
 		}
 	}
 
-	struct SegmentClosestPoints final {
+	struct SegmentClosestPoints {
 		Vector3 first{};
 		Vector3 second{};
 	};

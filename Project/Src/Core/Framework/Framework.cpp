@@ -19,7 +19,7 @@ bool Framework::Initialize(const RuntimeConfig& config) {
 	}
 
 	Win32Window& window = windowSystem_->GetWindow();
-	const Win32Window::Setting windowSetting = window.GetWndSetting();
+	const Win32Window::Setting windowSetting = window.GetSetting();
 
 	inputSystem_ = std::make_unique<InputSystem>();
 	if (!inputSystem_->Initialize(window.GetHwnd())) {
@@ -30,8 +30,8 @@ bool Framework::Initialize(const RuntimeConfig& config) {
 	graphicsSystem_ = std::make_unique<GraphicsSystem>();
 	const GraphicsInitDesc graphicsDesc{
 		.windowHandle = window.GetHwnd(),
-		.width = windowSetting.wndSize.width,
-		.height = windowSetting.wndSize.height,
+		.width = windowSetting.size.width,
+		.height = windowSetting.size.height,
 		.assetRoot = std::filesystem::absolute(config.assetRoot).lexically_normal(),
 	};
 	if (!graphicsSystem_->Initialize(graphicsDesc)) {
@@ -78,8 +78,8 @@ bool Framework::Update() {
 
 	Win32Window& window = windowSystem_->GetWindow();
 	if (window.IsResized()) {
-		const Win32Window::Setting setting = window.GetWndSetting();
-		if (!graphicsSystem_->Resize(setting.wndSize.width, setting.wndSize.height)) {
+		const Win32Window::Setting setting = window.GetSetting();
+		if (!graphicsSystem_->Resize(setting.size.width, setting.size.height)) {
 			return false;
 		}
 		window.ClearResizeFlag();
@@ -146,7 +146,7 @@ bool Framework::ToggleWindowFullscreen() {
 	if (!windowSystem_) {
 		return false;
 	}
-	windowSystem_->GetWindow().ToggleFullScreen();
+	windowSystem_->GetWindow().ToggleFullscreen();
 	return true;
 }
 

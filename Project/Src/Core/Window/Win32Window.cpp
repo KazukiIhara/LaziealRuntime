@@ -12,36 +12,28 @@ Win32Window::~Win32Window() {
 }
 
 bool Win32Window::Initialize(const Setting& setting) {
-	// 設定を取得
 	setting_ = setting;
-	const bool startFullscreen = setting_.isFullScreen;
-	setting_.isFullScreen = false;
+	const bool startFullscreen = setting_.fullscreen;
+	setting_.fullscreen = false;
 
-	// COMを初期化
 	HRESULT hr = CoInitializeEx(nullptr, COINIT_MULTITHREADED);
-
-	// 初期化失敗を確認
 	if (FAILED(hr) && hr != RPC_E_CHANGED_MODE) {
 		return false;
 	}
 
-	// COM初期化成功を記録
 	if (SUCCEEDED(hr)) {
 		isCOMInitialized_ = true;
 	}
 
-	// システムタイマー分解能をあげる
 	timeBeginPeriod(1);
 
-	// ゲームウィンドウの作成
 	CreateGameWindow(
-		setting.wndSize.width,
-		setting.wndSize.height,
-		setting.wndName,
+		setting.size.width,
+		setting.size.height,
+		setting.title,
 		WS_OVERLAPPEDWINDOW
 	);
 
-	// ウィンドウ生成失敗を確認
 	if (hwnd_ == nullptr) {
 		timeEndPeriod(1);
 
@@ -54,28 +46,24 @@ bool Win32Window::Initialize(const Setting& setting) {
 	}
 
 	if (startFullscreen) {
-		ToggleFullScreen();
+		ToggleFullscreen();
 	}
 
 	return true;
 }
 
 bool Win32Window::Finalize() {
-	// ウィンドウを破棄
 	if (hwnd_ != nullptr) {
 		DestroyWindow(hwnd_);
 		hwnd_ = nullptr;
 	}
 
-	// ウィンドウクラスを登録解除
 	if (wc_.lpszClassName != nullptr && wc_.hInstance != nullptr) {
 		UnregisterClass(wc_.lpszClassName, wc_.hInstance);
 	}
 
-	// タイマー分解能を戻す
 	timeEndPeriod(1);
 
-	// COMを終了
 	if (isCOMInitialized_) {
 		CoUninitialize();
 		isCOMInitialized_ = false;
@@ -85,17 +73,13 @@ bool Win32Window::Finalize() {
 }
 
 bool Win32Window::ProcessMessage() {
-	// メッセージ
 	MSG msg{};
 
-	// ウィンドウメッセージを処理
 	while (PeekMessage(&msg, nullptr, 0, 0, PM_REMOVE)) {
-		// 終了メッセージを検出
 		if (msg.message == WM_QUIT) {
 			return false;
 		}
 
-		// メッセージを変換して送る
 		TranslateMessage(&msg);
 		DispatchMessage(&msg);
 	}
@@ -107,11 +91,7 @@ HWND Win32Window::GetHwnd() const {
 	return hwnd_;
 }
 
-WNDCLASS Win32Window::GetWndClass() const {
-	return wc_;
-}
-
-Win32Window::Setting Win32Window::GetWndSetting() const {
+Win32Window::Setting Win32Window::GetSetting() const {
 	return setting_;
 }
 
@@ -132,7 +112,7 @@ bool Win32Window::SetTitle(std::wstring_view title) {
 	if (SetWindowTextW(hwnd_, ownedTitle.c_str()) == FALSE) {
 		return false;
 	}
-	setting_.wndName = ownedTitle;
+	setting_.title = ownedTitle;
 	return true;
 }
 
@@ -140,7 +120,7 @@ bool Win32Window::Resize(uint32_t width, uint32_t height) {
 	if (hwnd_ == nullptr || width == 0u || height == 0u ||
 		width > static_cast<uint32_t>(std::numeric_limits<LONG>::max()) ||
 		height > static_cast<uint32_t>(std::numeric_limits<LONG>::max()) ||
-		setting_.isFullScreen) {
+		setting_.fullscreen) {
 		return false;
 	}
 
@@ -166,32 +146,26 @@ bool Win32Window::Resize(uint32_t width, uint32_t height) {
 }
 
 void Win32Window::SetFullscreen(bool fullscreen) {
-	if (setting_.isFullScreen != fullscreen) {
-		ToggleFullScreen();
+	if (setting_.fullscreen != fullscreen) {
+		ToggleFullscreen();
 	}
 }
 
-void Win32Window::ToggleFullScreen() {
-	// 無効なウィンドウは処理しない
+void Win32Window::ToggleFullscreen() {
 	if (hwnd_ == nullptr) {
 		return;
 	}
 
-	// 現在のフルスクリーン状態を確認
-	if (!setting_.isFullScreen) {
-		// 現在のウィンドウ位置とサイズを保存
+	if (!setting_.fullscreen) {
 		GetWindowRect(hwnd_, &windowRect_);
 
-		// モニター情報を取得
 		HMONITOR monitor = MonitorFromWindow(hwnd_, MONITOR_DEFAULTTONEAREST);
 		MONITORINFO monitorInfo{};
 		monitorInfo.cbSize = sizeof(MONITORINFO);
 		GetMonitorInfo(monitor, &monitorInfo);
 
-		// フルスクリーン用スタイルに変更
 		SetWindowLongPtr(hwnd_, GWL_STYLE, WS_POPUP | WS_VISIBLE);
 
-		// モニター全体に合わせて表示
 		SetWindowPos(
 			hwnd_,
 			HWND_TOP,
@@ -202,13 +176,10 @@ void Win32Window::ToggleFullScreen() {
 			SWP_FRAMECHANGED | SWP_NOOWNERZORDER
 		);
 
-		// フルスクリーンフラグを設定
-		setting_.isFullScreen = true;
+		setting_.fullscreen = true;
 	} else {
-		// ウィンドウスタイルを元に戻す
 		SetWindowLongPtr(hwnd_, GWL_STYLE, WS_OVERLAPPEDWINDOW | WS_VISIBLE);
 
-		// 保存した位置とサイズに戻す
 		SetWindowPos(
 			hwnd_,
 			HWND_TOP,
@@ -219,24 +190,21 @@ void Win32Window::ToggleFullScreen() {
 			SWP_FRAMECHANGED | SWP_NOOWNERZORDER
 		);
 
-		// 通常表示に戻す
 		ShowWindow(hwnd_, SW_RESTORE);
-
-		// フルスクリーンフラグを解除
-		setting_.isFullScreen = false;
+		setting_.fullscreen = false;
 	}
 }
 
-Win32Window::WndSize Win32Window::GetSize() const {
-	return setting_.wndSize;
+Win32Window::Size Win32Window::GetSize() const {
+	return setting_.size;
 }
 
 std::wstring Win32Window::GetTitle() const {
-	return setting_.wndName;
+	return setting_.title;
 }
 
 bool Win32Window::IsFullscreen() const {
-	return setting_.isFullScreen;
+	return setting_.fullscreen;
 }
 
 void Win32Window::SetRawInputHandler(RawInputHandler handler) {
@@ -247,35 +215,25 @@ void Win32Window::SetMessageHandler(MessageHandler handler) {
 	messageHandler_ = std::move(handler);
 }
 
-void Win32Window::CreateGameWindow(int32_t clientWidth, int32_t clientHeight, const std::wstring& windowName, UINT windowStyle) {
-	// ウィンドウクラス情報を設定
+void Win32Window::CreateGameWindow(
+	int32_t clientWidth,
+	int32_t clientHeight,
+	const std::wstring& windowName,
+	UINT windowStyle) {
 	wc_ = {};
-
-	// ウィンドウプロシージャを設定
 	wc_.lpfnWndProc = WindowProc;
-
-	// ウィンドウクラス名を設定
 	wc_.lpszClassName = L"LGFWindowClass";
-
-	// インスタンスハンドルを設定
 	wc_.hInstance = GetModuleHandle(nullptr);
-
-	// カーソルを設定
 	wc_.hCursor = LoadCursor(nullptr, IDC_ARROW);
 
-	// ウィンドウクラスを登録
 	if (RegisterClass(&wc_) == 0) {
 		hwnd_ = nullptr;
 		return;
 	}
 
-	// クライアントサイズを設定
 	RECT wrc{ 0, 0, clientWidth, clientHeight };
-
-	// ウィンドウ枠を含めたサイズに変換
 	AdjustWindowRect(&wrc, windowStyle, false);
 
-	// ウィンドウを生成
 	hwnd_ = CreateWindow(
 		wc_.lpszClassName,
 		windowName.c_str(),
@@ -290,14 +248,11 @@ void Win32Window::CreateGameWindow(int32_t clientWidth, int32_t clientHeight, co
 		this
 	);
 
-	// 生成失敗を確認
 	if (hwnd_ == nullptr) {
 		return;
 	}
 
-	// ウィンドウを表示
 	ShowWindow(hwnd_, SW_SHOW);
-
 }
 
 LRESULT Win32Window::WindowProc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam) {
@@ -317,7 +272,6 @@ LRESULT Win32Window::WindowProc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lpara
 		return true;
 	}
 
-	// メッセージに応じてゲーム固有の処理を行う
 	switch (msg) {
 		case WM_SIZE:
 			if (window != nullptr && wparam != SIZE_MINIMIZED) {
@@ -328,12 +282,10 @@ LRESULT Win32Window::WindowProc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lpara
 			return 0;
 
 		case WM_DESTROY:
-			// OSに対してアプリの終了を伝える
 			PostQuitMessage(0);
 			return 0;
 	}
 
-	// 標準のメッセージ処理を行う
 	return DefWindowProc(hwnd, msg, wparam, lparam);
 }
 
@@ -342,11 +294,11 @@ void Win32Window::OnResize(uint32_t width, uint32_t height) {
 		return;
 	}
 
-	if (setting_.wndSize.width == width && setting_.wndSize.height == height) {
+	if (setting_.size.width == width && setting_.size.height == height) {
 		return;
 	}
 
-	setting_.wndSize.width = width;
-	setting_.wndSize.height = height;
+	setting_.size.width = width;
+	setting_.size.height = height;
 	isResized_ = true;
 }
