@@ -185,20 +185,21 @@ namespace LGF {
 
 		bool HasGyroscope(GamepadSensorType sensor = GamepadSensorType::Default) const;
 		bool HasAccelerometer(GamepadSensorType sensor = GamepadSensorType::Default) const;
-		// Angular velocity in radians per second.
+		// 角速度をラジアン毎秒で取得する。
 		Vector3 Gyroscope(GamepadSensorType sensor = GamepadSensorType::Default) const;
-		// Acceleration including gravity in metres per second squared.
+		// 重力を含む加速度をメートル毎秒毎秒で取得する。
 		Vector3 Acceleration(GamepadSensorType sensor = GamepadSensorType::Default) const;
-		// Sensor-sample-integrated rotation for the current frame in radians.
+		// 現在のフレームでセンサー値を積分した回転量をラジアンで取得する。
 		Vector3 RotationDelta(GamepadSensorType sensor = GamepadSensorType::Default) const;
 
 	private:
 		uint32_t index_;
 	};
 
-	/// Finds separately connected Joy-Con controllers by side.
-	/// `playerIndex` selects the Nth controller of that side when multiple
-	/// Joy-Con controllers are connected.
+	/// <summary>
+	/// 左右別々に接続されたJoy-Conを取得する。
+	/// 同じ側が複数接続されている場合はplayerIndexで取得対象を指定する。
+	/// </summary>
 	namespace JoyCon {
 		std::optional<Gamepad> Left(uint32_t playerIndex = 0u);
 		std::optional<Gamepad> Right(uint32_t playerIndex = 0u);

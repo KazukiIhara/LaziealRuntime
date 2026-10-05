@@ -9,6 +9,7 @@
 #include "LGF/Input.h"
 
 namespace LGF {
+
 	struct InputConfig;
 	class GamepadSystem;
 

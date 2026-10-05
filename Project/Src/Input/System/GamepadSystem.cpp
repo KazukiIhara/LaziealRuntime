@@ -1,14 +1,14 @@
 #include "GamepadSystem.h"
 
+#include <algorithm>
+#include <array>
+#include <limits>
+
 #include <SDL3/SDL_events.h>
 #include <SDL3/SDL_gamepad.h>
 #include <SDL3/SDL_hints.h>
 #include <SDL3/SDL_init.h>
 #include <SDL3/SDL_stdinc.h>
-
-#include <algorithm>
-#include <array>
-#include <limits>
 
 #include "Core/Config/RuntimeConfig.h"
 
@@ -21,7 +21,7 @@ namespace {
 	constexpr double kNanosecondsToSeconds = 1.0 / 1'000'000'000.0;
 	constexpr double kMaximumSensorInterval = 0.1;
 
-	constexpr std::array<SDL_GamepadButton, kButtonCount> kSdlButtons{
+	constexpr std::array<SDL_GamepadButton, kButtonCount> kSDLButtons{
 		SDL_GAMEPAD_BUTTON_SOUTH,
 		SDL_GAMEPAD_BUTTON_EAST,
 		SDL_GAMEPAD_BUTTON_WEST,
@@ -77,32 +77,32 @@ namespace {
 
 	GamepadType ToGamepadType(SDL_GamepadType type) {
 		switch (type) {
-			case SDL_GAMEPAD_TYPE_STANDARD:
-				return GamepadType::Standard;
-			case SDL_GAMEPAD_TYPE_XBOX360:
-				return GamepadType::Xbox360;
-			case SDL_GAMEPAD_TYPE_XBOXONE:
-				return GamepadType::XboxOne;
-			case SDL_GAMEPAD_TYPE_PS3:
-				return GamepadType::PlayStation3;
-			case SDL_GAMEPAD_TYPE_PS4:
-				return GamepadType::PlayStation4;
-			case SDL_GAMEPAD_TYPE_PS5:
-				return GamepadType::PlayStation5;
-			case SDL_GAMEPAD_TYPE_NINTENDO_SWITCH_PRO:
-				return GamepadType::SwitchPro;
-			case SDL_GAMEPAD_TYPE_NINTENDO_SWITCH_JOYCON_LEFT:
-				return GamepadType::JoyConLeft;
-			case SDL_GAMEPAD_TYPE_NINTENDO_SWITCH_JOYCON_RIGHT:
-				return GamepadType::JoyConRight;
-			case SDL_GAMEPAD_TYPE_NINTENDO_SWITCH_JOYCON_PAIR:
-				return GamepadType::JoyConPair;
-			case SDL_GAMEPAD_TYPE_GAMECUBE:
-				return GamepadType::GameCube;
-			case SDL_GAMEPAD_TYPE_STEAM:
-				return GamepadType::Steam;
-			default:
-				return GamepadType::Unknown;
+		case SDL_GAMEPAD_TYPE_STANDARD:
+			return GamepadType::Standard;
+		case SDL_GAMEPAD_TYPE_XBOX360:
+			return GamepadType::Xbox360;
+		case SDL_GAMEPAD_TYPE_XBOXONE:
+			return GamepadType::XboxOne;
+		case SDL_GAMEPAD_TYPE_PS3:
+			return GamepadType::PlayStation3;
+		case SDL_GAMEPAD_TYPE_PS4:
+			return GamepadType::PlayStation4;
+		case SDL_GAMEPAD_TYPE_PS5:
+			return GamepadType::PlayStation5;
+		case SDL_GAMEPAD_TYPE_NINTENDO_SWITCH_PRO:
+			return GamepadType::SwitchPro;
+		case SDL_GAMEPAD_TYPE_NINTENDO_SWITCH_JOYCON_LEFT:
+			return GamepadType::JoyConLeft;
+		case SDL_GAMEPAD_TYPE_NINTENDO_SWITCH_JOYCON_RIGHT:
+			return GamepadType::JoyConRight;
+		case SDL_GAMEPAD_TYPE_NINTENDO_SWITCH_JOYCON_PAIR:
+			return GamepadType::JoyConPair;
+		case SDL_GAMEPAD_TYPE_GAMECUBE:
+			return GamepadType::GameCube;
+		case SDL_GAMEPAD_TYPE_STEAM:
+			return GamepadType::Steam;
+		default:
+			return GamepadType::Unknown;
 		}
 	}
 
@@ -144,8 +144,8 @@ public:
 	};
 
 	bool Initialize(const GamepadConfig& config) {
-		enabled_ = config.enabled;
-		if (!enabled_) {
+		isEnabled_ = config.enabled;
+		if (!isEnabled_) {
 			return true;
 		}
 
@@ -161,21 +161,21 @@ public:
 			config.backgroundInput ? "1" : "0");
 
 		if (!SDL_InitSubSystem(SDL_INIT_GAMEPAD)) {
-			enabled_ = false;
+			isEnabled_ = false;
 			return false;
 		}
-		initialized_ = true;
+		isInitialized_ = true;
 
-		int count = 0;
-		SDL_JoystickID* gamepads = SDL_GetGamepads(&count);
-		if (gamepads == nullptr && count != 0) {
+		int gamepadCount = 0;
+		SDL_JoystickID* gamepadIds = SDL_GetGamepads(&gamepadCount);
+		if (gamepadIds == nullptr && gamepadCount != 0) {
 			Finalize();
 			return false;
 		}
-		for (int i = 0; i < count; ++i) {
-			OpenGamepad(gamepads[i]);
+		for (int index = 0; index < gamepadCount; ++index) {
+			OpenGamepad(gamepadIds[index]);
 		}
-		SDL_free(gamepads);
+		SDL_free(gamepadIds);
 		return true;
 	}
 
@@ -187,16 +187,16 @@ public:
 			slot = {};
 		}
 
-		if (initialized_) {
+		if (isInitialized_) {
 			SDL_QuitSubSystem(SDL_INIT_GAMEPAD);
 		}
-		initialized_ = false;
-		enabled_ = false;
+		isInitialized_ = false;
+		isEnabled_ = false;
 		return true;
 	}
 
 	void BeginFrame() {
-		if (!initialized_) {
+		if (!isInitialized_) {
 			return;
 		}
 
@@ -242,38 +242,38 @@ public:
 
 	const SensorState* ResolveSensor(
 		const Slot& slot,
-		GamepadSensorType requested,
-		bool gyroscope) const {
-		const auto isAvailable = [gyroscope](const SensorState& sensor) {
-			return gyroscope ? sensor.hasGyroscope : sensor.hasAccelerometer;
+		GamepadSensorType sensorType,
+		bool isGyroscope) const {
+		const auto isAvailable = [isGyroscope](const SensorState& sensor) {
+			return isGyroscope ? sensor.hasGyroscope : sensor.hasAccelerometer;
 		};
 
-		const SensorState& direct = slot.sensors[ToIndex(requested)];
-		if (isAvailable(direct)) {
-			return &direct;
+		const SensorState& requestedSensor = slot.sensors[ToIndex(sensorType)];
+		if (isAvailable(requestedSensor)) {
+			return &requestedSensor;
 		}
 
 		const SensorState& defaultSensor =
 			slot.sensors[ToIndex(GamepadSensorType::Default)];
-		if (requested == GamepadSensorType::Left && IsLeftJoyCon(slot.type) &&
+		if (sensorType == GamepadSensorType::Left && IsLeftJoyCon(slot.type) &&
 			isAvailable(defaultSensor)) {
 			return &defaultSensor;
 		}
-		if (requested == GamepadSensorType::Right && IsRightJoyCon(slot.type) &&
+		if (sensorType == GamepadSensorType::Right && IsRightJoyCon(slot.type) &&
 			isAvailable(defaultSensor)) {
 			return &defaultSensor;
 		}
 
-		if (requested != GamepadSensorType::Default) {
+		if (sensorType != GamepadSensorType::Default) {
 			return nullptr;
 		}
 
-		const SensorState& right = slot.sensors[ToIndex(GamepadSensorType::Right)];
-		if (isAvailable(right)) {
-			return &right;
+		const SensorState& rightSensor = slot.sensors[ToIndex(GamepadSensorType::Right)];
+		if (isAvailable(rightSensor)) {
+			return &rightSensor;
 		}
-		const SensorState& left = slot.sensors[ToIndex(GamepadSensorType::Left)];
-		return isAvailable(left) ? &left : nullptr;
+		const SensorState& leftSensor = slot.sensors[ToIndex(GamepadSensorType::Left)];
+		return isAvailable(leftSensor) ? &leftSensor : nullptr;
 	}
 
 	std::array<Slot, Gamepad::MaxCount> slots_{};
@@ -292,20 +292,20 @@ private:
 				break;
 			}
 
-			for (int i = 0; i < eventCount; ++i) {
-				const SDL_Event& event = events[static_cast<std::size_t>(i)];
+			for (int index = 0; index < eventCount; ++index) {
+				const SDL_Event& event = events[static_cast<std::size_t>(index)];
 				switch (event.type) {
-					case SDL_EVENT_GAMEPAD_ADDED:
-						OpenGamepad(event.gdevice.which);
-						break;
-					case SDL_EVENT_GAMEPAD_REMOVED:
-						CloseGamepad(event.gdevice.which);
-						break;
-					case SDL_EVENT_GAMEPAD_SENSOR_UPDATE:
-						HandleSensorEvent(event.gsensor);
-						break;
-					default:
-						break;
+				case SDL_EVENT_GAMEPAD_ADDED:
+					OpenGamepad(event.gdevice.which);
+					break;
+				case SDL_EVENT_GAMEPAD_REMOVED:
+					CloseGamepad(event.gdevice.which);
+					break;
+				case SDL_EVENT_GAMEPAD_SENSOR_UPDATE:
+					HandleSensorEvent(event.gsensor);
+					break;
+				default:
+					break;
 				}
 			}
 		}
@@ -316,38 +316,38 @@ private:
 			return;
 		}
 
-		Slot* target = nullptr;
+		Slot* targetSlot = nullptr;
 		for (Slot& slot : slots_) {
 			if (slot.handle == nullptr) {
-				target = &slot;
+				targetSlot = &slot;
 				break;
 			}
 		}
-		if (target == nullptr) {
+		if (targetSlot == nullptr) {
 			return;
 		}
 
-		SDL_Gamepad* handle = SDL_OpenGamepad(instanceId);
-		if (handle == nullptr) {
+		SDL_Gamepad* gamepad = SDL_OpenGamepad(instanceId);
+		if (gamepad == nullptr) {
 			return;
 		}
 
-		*target = {};
-		target->handle = handle;
-		target->instanceId = instanceId;
-		target->type = ToGamepadType(SDL_GetGamepadType(handle));
-		if (const char* name = SDL_GetGamepadName(handle)) {
-			target->name = name;
+		*targetSlot = {};
+		targetSlot->handle = gamepad;
+		targetSlot->instanceId = instanceId;
+		targetSlot->type = ToGamepadType(SDL_GetGamepadType(gamepad));
+		if (const char* name = SDL_GetGamepadName(gamepad)) {
+			targetSlot->name = name;
 		}
 
-		EnableSensor(*target, SDL_SENSOR_GYRO, GamepadSensorType::Default, true);
-		EnableSensor(*target, SDL_SENSOR_ACCEL, GamepadSensorType::Default, false);
-		EnableSensor(*target, SDL_SENSOR_GYRO_L, GamepadSensorType::Left, true);
-		EnableSensor(*target, SDL_SENSOR_ACCEL_L, GamepadSensorType::Left, false);
-		EnableSensor(*target, SDL_SENSOR_GYRO_R, GamepadSensorType::Right, true);
-		EnableSensor(*target, SDL_SENSOR_ACCEL_R, GamepadSensorType::Right, false);
-		UpdateState(*target);
-		target->previousButtons = target->currentButtons;
+		EnableSensor(*targetSlot, SDL_SENSOR_GYRO, GamepadSensorType::Default, true);
+		EnableSensor(*targetSlot, SDL_SENSOR_ACCEL, GamepadSensorType::Default, false);
+		EnableSensor(*targetSlot, SDL_SENSOR_GYRO_L, GamepadSensorType::Left, true);
+		EnableSensor(*targetSlot, SDL_SENSOR_ACCEL_L, GamepadSensorType::Left, false);
+		EnableSensor(*targetSlot, SDL_SENSOR_GYRO_R, GamepadSensorType::Right, true);
+		EnableSensor(*targetSlot, SDL_SENSOR_ACCEL_R, GamepadSensorType::Right, false);
+		UpdateState(*targetSlot);
+		targetSlot->previousButtons = targetSlot->currentButtons;
 	}
 
 	void CloseGamepad(SDL_JoystickID instanceId) {
@@ -372,18 +372,18 @@ private:
 
 	void EnableSensor(
 		Slot& slot,
-		SDL_SensorType sdlType,
-		GamepadSensorType publicType,
-		bool gyroscope) {
-		if (!SDL_GamepadHasSensor(slot.handle, sdlType)) {
+		SDL_SensorType sensorType,
+		GamepadSensorType gamepadSensorType,
+		bool isGyroscope) {
+		if (!SDL_GamepadHasSensor(slot.handle, sensorType)) {
 			return;
 		}
-		if (!SDL_SetGamepadSensorEnabled(slot.handle, sdlType, true)) {
+		if (!SDL_SetGamepadSensorEnabled(slot.handle, sensorType, true)) {
 			return;
 		}
 
-		SensorState& sensor = slot.sensors[ToIndex(publicType)];
-		if (gyroscope) {
+		SensorState& sensor = slot.sensors[ToIndex(gamepadSensorType)];
+		if (isGyroscope) {
 			sensor.hasGyroscope = true;
 		} else {
 			sensor.hasAccelerometer = true;
@@ -391,12 +391,12 @@ private:
 	}
 
 	void UpdateState(Slot& slot) {
-		for (std::size_t i = 0; i < kButtonCount; ++i) {
-			slot.currentButtons[i] = SDL_GetGamepadButton(slot.handle, kSdlButtons[i]);
-			if (slot.currentButtons[i]) {
-				++slot.pressedFrames[i];
+		for (std::size_t index = 0; index < kButtonCount; ++index) {
+			slot.currentButtons[index] = SDL_GetGamepadButton(slot.handle, kSDLButtons[index]);
+			if (slot.currentButtons[index]) {
+				++slot.pressedFrames[index];
 			} else {
-				slot.pressedFrames[i] = 0u;
+				slot.pressedFrames[index] = 0u;
 			}
 		}
 
@@ -420,38 +420,38 @@ private:
 			return;
 		}
 
-		GamepadSensorType publicType{};
-		bool gyroscope = false;
+		GamepadSensorType gamepadSensorType{};
+		bool isGyroscope = false;
 		switch (static_cast<SDL_SensorType>(event.sensor)) {
-			case SDL_SENSOR_GYRO:
-				publicType = GamepadSensorType::Default;
-				gyroscope = true;
-				break;
-			case SDL_SENSOR_ACCEL:
-				publicType = GamepadSensorType::Default;
-				break;
-			case SDL_SENSOR_GYRO_L:
-				publicType = GamepadSensorType::Left;
-				gyroscope = true;
-				break;
-			case SDL_SENSOR_ACCEL_L:
-				publicType = GamepadSensorType::Left;
-				break;
-			case SDL_SENSOR_GYRO_R:
-				publicType = GamepadSensorType::Right;
-				gyroscope = true;
-				break;
-			case SDL_SENSOR_ACCEL_R:
-				publicType = GamepadSensorType::Right;
-				break;
-			default:
-				return;
+		case SDL_SENSOR_GYRO:
+			gamepadSensorType = GamepadSensorType::Default;
+			isGyroscope = true;
+			break;
+		case SDL_SENSOR_ACCEL:
+			gamepadSensorType = GamepadSensorType::Default;
+			break;
+		case SDL_SENSOR_GYRO_L:
+			gamepadSensorType = GamepadSensorType::Left;
+			isGyroscope = true;
+			break;
+		case SDL_SENSOR_ACCEL_L:
+			gamepadSensorType = GamepadSensorType::Left;
+			break;
+		case SDL_SENSOR_GYRO_R:
+			gamepadSensorType = GamepadSensorType::Right;
+			isGyroscope = true;
+			break;
+		case SDL_SENSOR_ACCEL_R:
+			gamepadSensorType = GamepadSensorType::Right;
+			break;
+		default:
+			return;
 		}
 
-		SensorState& sensor = slot->sensors[ToIndex(publicType)];
-		const Vector3 value{ event.data[0], event.data[1], event.data[2] };
-		if (!gyroscope) {
-			sensor.acceleration = value;
+		SensorState& sensor = slot->sensors[ToIndex(gamepadSensorType)];
+		const Vector3 sensorValue{ event.data[0], event.data[1], event.data[2] };
+		if (!isGyroscope) {
+			sensor.acceleration = sensorValue;
 			return;
 		}
 
@@ -460,21 +460,21 @@ private:
 			: event.timestamp;
 		if (sensor.previousGyroscopeTimestamp != 0u &&
 			timestamp > sensor.previousGyroscopeTimestamp) {
-			const double elapsed = static_cast<double>(
+			const double elapsedSeconds = static_cast<double>(
 				timestamp - sensor.previousGyroscopeTimestamp) * kNanosecondsToSeconds;
-			if (elapsed <= kMaximumSensorInterval) {
-				const float halfElapsed = static_cast<float>(elapsed * 0.5);
+			if (elapsedSeconds <= kMaximumSensorInterval) {
+				const float halfElapsedSeconds = static_cast<float>(elapsedSeconds * 0.5);
 				sensor.rotationDelta +=
-					(sensor.previousGyroscope + value) * halfElapsed;
+					(sensor.previousGyroscope + sensorValue) * halfElapsedSeconds;
 			}
 		}
-		sensor.previousGyroscope = value;
+		sensor.previousGyroscope = sensorValue;
 		sensor.previousGyroscopeTimestamp = timestamp;
-		sensor.gyroscope = value;
+		sensor.gyroscope = sensorValue;
 	}
 
-	bool enabled_ = false;
-	bool initialized_ = false;
+	bool isEnabled_ = false;
+	bool isInitialized_ = false;
 };
 
 GamepadSystem::GamepadSystem() :
