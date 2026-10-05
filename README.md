@@ -1,27 +1,52 @@
 # LaziealRuntime
 
-LaziealRuntime is the application layer for LaziealGraphicsFramework. It owns the
-window, input, frame loop, timing, and the entry point while the graphics backend
-is supplied as a Git submodule.
+LaziealGraphicsFrameworkをゲームアプリケーションから扱いやすくするための
+アプリケーション層です。ウィンドウ、入力、フレームループ、時間管理、
+エントリーポイントを担当し、描画機能はGit submoduleとして参照する
+LaziealGraphicsFrameworkから提供されます。
 
-## Clone
+## クローン
+
+依存リポジトリを含めて取得します。
 
 ```powershell
 git clone --recursive <repository-url>
 ```
 
-If the repository was cloned without `--recursive`, initialize dependencies with:
+再帰オプションを付けずにクローンした場合は、次のコマンドを実行してください。
 
 ```powershell
 git submodule update --init --recursive
 ```
 
-## Generate and build
+## プロジェクト生成とビルド
 
-Run `Project/Premake.bat`, then build `Project/LaziealRuntime.slnx` for x64.
-The default development configuration is `Develop`.
+`Project/Premake.bat`を実行した後、生成された
+`Project/LaziealRuntime.slnx`をVisual Studioで開き、x64構成をビルドします。
+通常の開発には`Develop`構成を使用します。
 
-## Public API
+## 公開API
 
-Include `LGF/LGF.h` from `Project/Include`. Applications provide
-`ConfigureRuntime()` and `Main()`; the runtime owns `WinMain` and calls them.
+アプリケーション側では`Project/Include`にある`LGF/LGF.h`をインクルードします。
+Runtimeが`WinMain`を所有し、アプリケーションが定義した`ConfigureRuntime()`と
+`Main()`を呼び出します。
+
+```cpp
+#include <LGF/LGF.h>
+
+void Main() {
+    while (LGF::System::Update()) {
+        // 更新処理と描画処理
+    }
+}
+```
+
+## 主な役割
+
+- Win32ウィンドウの生成と管理
+- メインループとフレームライフサイクル
+- DeltaTimeなどの時間管理
+- キーボード、マウス、ゲームパッド入力
+- SDL3を利用したJoy-Conとモーションセンサー入力
+- INIファイルからのランタイム設定読み込み
+- LaziealGraphicsFrameworkの初期化と終了処理
