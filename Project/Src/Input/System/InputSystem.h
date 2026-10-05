@@ -2,18 +2,22 @@
 
 #include <array>
 #include <cstdint>
+#include <memory>
+#include <string>
 #include <Windows.h>
 
 #include "LGF/Input.h"
 
 namespace LGF {
+	struct InputConfig;
+	class GamepadSystem;
 
 	class InputSystem {
 	public:
 		InputSystem();
 		~InputSystem();
 
-		bool Initialize(void* windowHandle);
+		bool Initialize(void* windowHandle, const InputConfig& config);
 		bool Finalize();
 
 		void BeginFrame();
@@ -33,6 +37,25 @@ namespace LGF {
 		float GetMouseWheelDelta() const;
 		Vector2 GetCursorPos() const;
 		Vector2 GetCursorDelta() const;
+
+		bool IsGamepadConnected(uint32_t gamepadIndex) const;
+		GamepadType GetGamepadType(uint32_t gamepadIndex) const;
+		std::string GetGamepadName(uint32_t gamepadIndex) const;
+		Vector2 GetGamepadLeftStick(uint32_t gamepadIndex) const;
+		Vector2 GetGamepadRightStick(uint32_t gamepadIndex) const;
+		float GetGamepadLeftTrigger(uint32_t gamepadIndex) const;
+		float GetGamepadRightTrigger(uint32_t gamepadIndex) const;
+
+		bool IsTriggered(uint32_t gamepadIndex, GamepadButtonCode code) const;
+		bool IsPressed(uint32_t gamepadIndex, GamepadButtonCode code) const;
+		bool IsReleased(uint32_t gamepadIndex, GamepadButtonCode code) const;
+		uint32_t GetPressedFrames(uint32_t gamepadIndex, GamepadButtonCode code) const;
+
+		bool HasGamepadGyroscope(uint32_t gamepadIndex, GamepadSensorType sensor) const;
+		bool HasGamepadAccelerometer(uint32_t gamepadIndex, GamepadSensorType sensor) const;
+		Vector3 GetGamepadGyroscope(uint32_t gamepadIndex, GamepadSensorType sensor) const;
+		Vector3 GetGamepadAcceleration(uint32_t gamepadIndex, GamepadSensorType sensor) const;
+		Vector3 GetGamepadRotationDelta(uint32_t gamepadIndex, GamepadSensorType sensor) const;
 
 		void HandleRawInput(void* rawInputHandle);
 
@@ -60,6 +83,8 @@ namespace LGF {
 		HWND hwnd_ = nullptr;
 		Vector2 cursorPos_{};
 		Vector2 previousCursorPos_{};
+
+		std::unique_ptr<GamepadSystem> gamepadSystem_;
 	};
 
 }

@@ -1,8 +1,11 @@
 #pragma once
 
 #include <cstdint>
+#include <optional>
+#include <string>
 
 #include "LGF/Math/Vector2.h"
+#include "LGF/Math/Vector3.h"
 
 namespace LGF {
 
@@ -64,6 +67,58 @@ namespace LGF {
 		Count
 	};
 
+	enum class GamepadButtonCode : uint8_t {
+		South,
+		East,
+		West,
+		North,
+		Back,
+		Guide,
+		Start,
+		LeftStick,
+		RightStick,
+		LeftShoulder,
+		RightShoulder,
+		DPadUp,
+		DPadDown,
+		DPadLeft,
+		DPadRight,
+		Misc1,
+		RightPaddle1,
+		LeftPaddle1,
+		RightPaddle2,
+		LeftPaddle2,
+		Touchpad,
+		Misc2,
+		Misc3,
+		Misc4,
+		Misc5,
+		Misc6,
+		Count
+	};
+
+	enum class GamepadType : uint8_t {
+		Unknown,
+		Standard,
+		Xbox360,
+		XboxOne,
+		PlayStation3,
+		PlayStation4,
+		PlayStation5,
+		SwitchPro,
+		JoyConLeft,
+		JoyConRight,
+		JoyConPair,
+		GameCube,
+		Steam,
+	};
+
+	enum class GamepadSensorType : uint8_t {
+		Default,
+		Left,
+		Right,
+	};
+
 	class KeyButton {
 	public:
 		constexpr explicit KeyButton(KeyCode code) :
@@ -93,6 +148,61 @@ namespace LGF {
 	private:
 		MouseButtonCode code_;
 	};
+
+	class GamepadButton {
+	public:
+		constexpr GamepadButton(uint32_t gamepadIndex, GamepadButtonCode code) :
+			gamepadIndex_(gamepadIndex),
+			code_(code) {
+		}
+
+		bool Trigger() const;
+		bool Press() const;
+		bool Release() const;
+		uint32_t PressedFrames() const;
+
+	private:
+		uint32_t gamepadIndex_;
+		GamepadButtonCode code_;
+	};
+
+	class Gamepad {
+	public:
+		static constexpr uint32_t MaxCount = 8u;
+
+		constexpr explicit Gamepad(uint32_t index) :
+			index_(index) {
+		}
+
+		bool IsConnected() const;
+		GamepadType Type() const;
+		std::string Name() const;
+		Vector2 LeftStick() const;
+		Vector2 RightStick() const;
+		float LeftTrigger() const;
+		float RightTrigger() const;
+		GamepadButton Button(GamepadButtonCode code) const;
+
+		bool HasGyroscope(GamepadSensorType sensor = GamepadSensorType::Default) const;
+		bool HasAccelerometer(GamepadSensorType sensor = GamepadSensorType::Default) const;
+		// Angular velocity in radians per second.
+		Vector3 Gyroscope(GamepadSensorType sensor = GamepadSensorType::Default) const;
+		// Acceleration including gravity in metres per second squared.
+		Vector3 Acceleration(GamepadSensorType sensor = GamepadSensorType::Default) const;
+		// Sensor-sample-integrated rotation for the current frame in radians.
+		Vector3 RotationDelta(GamepadSensorType sensor = GamepadSensorType::Default) const;
+
+	private:
+		uint32_t index_;
+	};
+
+	/// Finds separately connected Joy-Con controllers by side.
+	/// `playerIndex` selects the Nth controller of that side when multiple
+	/// Joy-Con controllers are connected.
+	namespace JoyCon {
+		std::optional<Gamepad> Left(uint32_t playerIndex = 0u);
+		std::optional<Gamepad> Right(uint32_t playerIndex = 0u);
+	}
 
 	namespace Key {
 		inline constexpr KeyButton Space{ KeyCode::Space };

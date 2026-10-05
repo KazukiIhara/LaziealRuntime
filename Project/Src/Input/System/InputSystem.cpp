@@ -2,7 +2,9 @@
 
 #include <vector>
 
+#include "Core/Config/RuntimeConfig.h"
 #include "Input/InputInternal.h"
+#include "Input/System/GamepadSystem.h"
 
 using namespace LGF;
 
@@ -22,7 +24,7 @@ InputSystem::InputSystem() {
 
 InputSystem::~InputSystem() = default;
 
-bool InputSystem::Initialize(void* windowHandle) {
+bool InputSystem::Initialize(void* windowHandle, const InputConfig& config) {
 	g_inputSystem = this;
 
 	hwnd_ = static_cast<HWND>(windowHandle);
@@ -32,19 +34,40 @@ bool InputSystem::Initialize(void* windowHandle) {
 	UpdateCursorPos();
 	previousCursorPos_ = cursorPos_;
 
-	return RegisterRawInput(hwnd_);
+	if (!RegisterRawInput(hwnd_)) {
+		g_inputSystem = nullptr;
+		hwnd_ = nullptr;
+		return false;
+	}
+
+	gamepadSystem_ = std::make_unique<GamepadSystem>();
+	if (!gamepadSystem_->Initialize(config.gamepad)) {
+		gamepadSystem_.reset();
+		g_inputSystem = nullptr;
+		hwnd_ = nullptr;
+		return false;
+	}
+	return true;
 }
 
 bool InputSystem::Finalize() {
+	bool succeeded = true;
+	if (gamepadSystem_) {
+		succeeded = gamepadSystem_->Finalize();
+		gamepadSystem_.reset();
+	}
 	g_inputSystem = nullptr;
 	hwnd_ = nullptr;
 
-	return true;
+	return succeeded;
 }
 
 void InputSystem::BeginFrame() {
 	UpdateCursorPos();
 	UpdatePressedFrames();
+	if (gamepadSystem_) {
+		gamepadSystem_->BeginFrame();
+	}
 }
 
 void InputSystem::EndFrame() {
@@ -53,6 +76,9 @@ void InputSystem::EndFrame() {
 	previousCursorPos_ = cursorPos_;
 	mouseDelta_ = {};
 	mouseWheelDelta_ = 0.0f;
+	if (gamepadSystem_) {
+		gamepadSystem_->EndFrame();
+	}
 }
 
 bool InputSystem::IsTriggered(KeyCode code) const {
@@ -105,6 +131,82 @@ Vector2 InputSystem::GetCursorPos() const {
 
 Vector2 InputSystem::GetCursorDelta() const {
 	return cursorPos_ - previousCursorPos_;
+}
+
+bool InputSystem::IsGamepadConnected(uint32_t gamepadIndex) const {
+	return gamepadSystem_ && gamepadSystem_->IsConnected(gamepadIndex);
+}
+
+GamepadType InputSystem::GetGamepadType(uint32_t gamepadIndex) const {
+	return gamepadSystem_
+		? gamepadSystem_->GetType(gamepadIndex)
+		: GamepadType::Unknown;
+}
+
+std::string InputSystem::GetGamepadName(uint32_t gamepadIndex) const {
+	return gamepadSystem_ ? gamepadSystem_->GetName(gamepadIndex) : std::string{};
+}
+
+Vector2 InputSystem::GetGamepadLeftStick(uint32_t gamepadIndex) const {
+	return gamepadSystem_ ? gamepadSystem_->GetLeftStick(gamepadIndex) : Vector2{};
+}
+
+Vector2 InputSystem::GetGamepadRightStick(uint32_t gamepadIndex) const {
+	return gamepadSystem_ ? gamepadSystem_->GetRightStick(gamepadIndex) : Vector2{};
+}
+
+float InputSystem::GetGamepadLeftTrigger(uint32_t gamepadIndex) const {
+	return gamepadSystem_ ? gamepadSystem_->GetLeftTrigger(gamepadIndex) : 0.0f;
+}
+
+float InputSystem::GetGamepadRightTrigger(uint32_t gamepadIndex) const {
+	return gamepadSystem_ ? gamepadSystem_->GetRightTrigger(gamepadIndex) : 0.0f;
+}
+
+bool InputSystem::IsTriggered(uint32_t gamepadIndex, GamepadButtonCode code) const {
+	return gamepadSystem_ && gamepadSystem_->IsTriggered(gamepadIndex, code);
+}
+
+bool InputSystem::IsPressed(uint32_t gamepadIndex, GamepadButtonCode code) const {
+	return gamepadSystem_ && gamepadSystem_->IsPressed(gamepadIndex, code);
+}
+
+bool InputSystem::IsReleased(uint32_t gamepadIndex, GamepadButtonCode code) const {
+	return gamepadSystem_ && gamepadSystem_->IsReleased(gamepadIndex, code);
+}
+
+uint32_t InputSystem::GetPressedFrames(uint32_t gamepadIndex, GamepadButtonCode code) const {
+	return gamepadSystem_ ? gamepadSystem_->GetPressedFrames(gamepadIndex, code) : 0u;
+}
+
+bool InputSystem::HasGamepadGyroscope(
+	uint32_t gamepadIndex,
+	GamepadSensorType sensor) const {
+	return gamepadSystem_ && gamepadSystem_->HasGyroscope(gamepadIndex, sensor);
+}
+
+bool InputSystem::HasGamepadAccelerometer(
+	uint32_t gamepadIndex,
+	GamepadSensorType sensor) const {
+	return gamepadSystem_ && gamepadSystem_->HasAccelerometer(gamepadIndex, sensor);
+}
+
+Vector3 InputSystem::GetGamepadGyroscope(
+	uint32_t gamepadIndex,
+	GamepadSensorType sensor) const {
+	return gamepadSystem_ ? gamepadSystem_->GetGyroscope(gamepadIndex, sensor) : Vector3{};
+}
+
+Vector3 InputSystem::GetGamepadAcceleration(
+	uint32_t gamepadIndex,
+	GamepadSensorType sensor) const {
+	return gamepadSystem_ ? gamepadSystem_->GetAcceleration(gamepadIndex, sensor) : Vector3{};
+}
+
+Vector3 InputSystem::GetGamepadRotationDelta(
+	uint32_t gamepadIndex,
+	GamepadSensorType sensor) const {
+	return gamepadSystem_ ? gamepadSystem_->GetRotationDelta(gamepadIndex, sensor) : Vector3{};
 }
 
 void InputSystem::HandleRawInput(void* rawInputHandle) {
@@ -416,4 +518,108 @@ Vector2 LGF::Input::Internal::GetCursorDelta() {
 	}
 
 	return g_inputSystem->GetCursorDelta();
+}
+
+bool LGF::Input::Internal::IsGamepadConnected(uint32_t gamepadIndex) {
+	return g_inputSystem != nullptr && g_inputSystem->IsGamepadConnected(gamepadIndex);
+}
+
+GamepadType LGF::Input::Internal::GetGamepadType(uint32_t gamepadIndex) {
+	return g_inputSystem != nullptr
+		? g_inputSystem->GetGamepadType(gamepadIndex)
+		: GamepadType::Unknown;
+}
+
+std::string LGF::Input::Internal::GetGamepadName(uint32_t gamepadIndex) {
+	return g_inputSystem != nullptr
+		? g_inputSystem->GetGamepadName(gamepadIndex)
+		: std::string{};
+}
+
+Vector2 LGF::Input::Internal::GetGamepadLeftStick(uint32_t gamepadIndex) {
+	return g_inputSystem != nullptr
+		? g_inputSystem->GetGamepadLeftStick(gamepadIndex)
+		: Vector2{};
+}
+
+Vector2 LGF::Input::Internal::GetGamepadRightStick(uint32_t gamepadIndex) {
+	return g_inputSystem != nullptr
+		? g_inputSystem->GetGamepadRightStick(gamepadIndex)
+		: Vector2{};
+}
+
+float LGF::Input::Internal::GetGamepadLeftTrigger(uint32_t gamepadIndex) {
+	return g_inputSystem != nullptr
+		? g_inputSystem->GetGamepadLeftTrigger(gamepadIndex)
+		: 0.0f;
+}
+
+float LGF::Input::Internal::GetGamepadRightTrigger(uint32_t gamepadIndex) {
+	return g_inputSystem != nullptr
+		? g_inputSystem->GetGamepadRightTrigger(gamepadIndex)
+		: 0.0f;
+}
+
+bool LGF::Input::Internal::IsTriggered(
+	uint32_t gamepadIndex,
+	GamepadButtonCode code) {
+	return g_inputSystem != nullptr && g_inputSystem->IsTriggered(gamepadIndex, code);
+}
+
+bool LGF::Input::Internal::IsPressed(
+	uint32_t gamepadIndex,
+	GamepadButtonCode code) {
+	return g_inputSystem != nullptr && g_inputSystem->IsPressed(gamepadIndex, code);
+}
+
+bool LGF::Input::Internal::IsReleased(
+	uint32_t gamepadIndex,
+	GamepadButtonCode code) {
+	return g_inputSystem != nullptr && g_inputSystem->IsReleased(gamepadIndex, code);
+}
+
+uint32_t LGF::Input::Internal::GetPressedFrames(
+	uint32_t gamepadIndex,
+	GamepadButtonCode code) {
+	return g_inputSystem != nullptr
+		? g_inputSystem->GetPressedFrames(gamepadIndex, code)
+		: 0u;
+}
+
+bool LGF::Input::Internal::HasGamepadGyroscope(
+	uint32_t gamepadIndex,
+	GamepadSensorType sensor) {
+	return g_inputSystem != nullptr &&
+		g_inputSystem->HasGamepadGyroscope(gamepadIndex, sensor);
+}
+
+bool LGF::Input::Internal::HasGamepadAccelerometer(
+	uint32_t gamepadIndex,
+	GamepadSensorType sensor) {
+	return g_inputSystem != nullptr &&
+		g_inputSystem->HasGamepadAccelerometer(gamepadIndex, sensor);
+}
+
+Vector3 LGF::Input::Internal::GetGamepadGyroscope(
+	uint32_t gamepadIndex,
+	GamepadSensorType sensor) {
+	return g_inputSystem != nullptr
+		? g_inputSystem->GetGamepadGyroscope(gamepadIndex, sensor)
+		: Vector3{};
+}
+
+Vector3 LGF::Input::Internal::GetGamepadAcceleration(
+	uint32_t gamepadIndex,
+	GamepadSensorType sensor) {
+	return g_inputSystem != nullptr
+		? g_inputSystem->GetGamepadAcceleration(gamepadIndex, sensor)
+		: Vector3{};
+}
+
+Vector3 LGF::Input::Internal::GetGamepadRotationDelta(
+	uint32_t gamepadIndex,
+	GamepadSensorType sensor) {
+	return g_inputSystem != nullptr
+		? g_inputSystem->GetGamepadRotationDelta(gamepadIndex, sensor)
+		: Vector3{};
 }

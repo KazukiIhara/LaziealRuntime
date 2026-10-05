@@ -22,7 +22,7 @@ bool Framework::Initialize(const RuntimeConfig& config) {
 	const Win32Window::Setting windowSetting = window.GetSetting();
 
 	inputSystem_ = std::make_unique<InputSystem>();
-	if (!inputSystem_->Initialize(window.GetHwnd())) {
+	if (!inputSystem_->Initialize(window.GetHwnd(), config.input)) {
 		windowSystem_->Finalize();
 		return false;
 	}

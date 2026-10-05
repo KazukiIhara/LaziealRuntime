@@ -24,6 +24,7 @@ project "LaziealRuntime"
         "../Src",
         "../Include",
         "../../Dependencies/LaziealGraphicsFramework/Project/Include",
+        "../../Dependencies/SDL3/include",
     }
 
     defines { "NOMINMAX" }

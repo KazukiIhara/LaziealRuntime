@@ -13,9 +13,21 @@ namespace LGF {
 		bool fullscreen = false;
 	};
 
+	struct GamepadConfig {
+		bool enabled = true;
+		bool combineJoyCons = false;
+		bool verticalJoyCons = true;
+		bool backgroundInput = false;
+	};
+
+	struct InputConfig {
+		GamepadConfig gamepad{};
+	};
+
 	struct RuntimeConfig {
 		std::filesystem::path assetRoot = "Assets";
 		WindowConfig window{};
+		InputConfig input{};
 	};
 
 }

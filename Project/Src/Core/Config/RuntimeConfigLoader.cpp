@@ -154,6 +154,22 @@ std::optional<LGF::RuntimeConfig> LGF::LoadRuntimeConfig(
 			if (!ParseBool(value, config.window.fullscreen)) {
 				return std::nullopt;
 			}
+		} else if (section == "input.gamepad" && key == "enabled") {
+			if (!ParseBool(value, config.input.gamepad.enabled)) {
+				return std::nullopt;
+			}
+		} else if (section == "input.gamepad" && key == "combinejoycons") {
+			if (!ParseBool(value, config.input.gamepad.combineJoyCons)) {
+				return std::nullopt;
+			}
+		} else if (section == "input.gamepad" && key == "verticaljoycons") {
+			if (!ParseBool(value, config.input.gamepad.verticalJoyCons)) {
+				return std::nullopt;
+			}
+		} else if (section == "input.gamepad" && key == "backgroundinput") {
+			if (!ParseBool(value, config.input.gamepad.backgroundInput)) {
+				return std::nullopt;
+			}
 		}
 	}
 
