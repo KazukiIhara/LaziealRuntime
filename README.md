@@ -25,6 +25,11 @@ git submodule update --init --recursive
 `Project/LaziealRuntime.slnx`をVisual Studioで開き、x64構成をビルドします。
 通常の開発には`Develop`構成を使用します。
 
+同じソリューションには、JSONパラメータを編集する独立アプリ
+`LaziealParameterEditor`も生成されます。エディタのソースと専用設定は
+`Tools/ParameterEditor`にあり、ビルド後の実行一式は
+`generated/outputs/<構成>/x64/ParameterEditor`へ出力されます。
+
 ## 公開API
 
 アプリケーション側では`Project/Include`にある`LGF/LGF.h`をインクルードします。
@@ -49,4 +54,20 @@ void Main() {
 - キーボード、マウス、ゲームパッド入力
 - SDL3を利用したJoy-Conとモーションセンサー入力
 - INIファイルからのランタイム設定読み込み
+- 型付きJSONパラメータの読み込みと保存
 - LaziealGraphicsFrameworkの初期化と終了処理
+
+## JSONパラメータ
+
+`LGF::ParameterDocument`は、`/`区切りのパスで階層パラメータを扱います。
+JSONの解析に失敗した場合は`ParameterIoResult`に理由が格納され、読み込み前の
+ドキュメントは変更されません。
+
+```cpp
+LGF::ParameterDocument parameters;
+const LGF::ParameterIoResult result =
+    parameters.Load("Assets/Parameters/Game.json");
+if (result) {
+    const float speed = parameters.GetOr<float>("Player/Speed", 1.0f);
+}
+```

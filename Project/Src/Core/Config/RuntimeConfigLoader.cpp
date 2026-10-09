@@ -173,5 +173,12 @@ std::optional<LGF::RuntimeConfig> LGF::LoadRuntimeConfig(
 		}
 	}
 
+	if (config.assetRoot.is_relative()) {
+		const std::filesystem::path configDirectory =
+			std::filesystem::absolute(filePath).parent_path();
+		config.assetRoot =
+			(configDirectory / config.assetRoot).lexically_normal();
+	}
+
 	return config;
 }

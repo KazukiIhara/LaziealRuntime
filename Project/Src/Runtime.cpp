@@ -11,11 +11,17 @@ namespace LGF::Detail {
 }
 
 int LGF::Run(MainFunction mainFunction) {
+	return Run(mainFunction, "RuntimeSetting.ini");
+}
+
+int LGF::Run(
+	MainFunction mainFunction,
+	const std::filesystem::path& configFilePath) {
 	if (mainFunction == nullptr) {
 		return EXIT_FAILURE;
 	}
 	const std::optional<RuntimeConfig> config =
-		LoadRuntimeConfig("RuntimeSetting.ini");
+		LoadRuntimeConfig(configFilePath);
 	if (!config) {
 		return EXIT_FAILURE;
 	}

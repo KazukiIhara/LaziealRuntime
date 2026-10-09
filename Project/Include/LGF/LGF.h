@@ -5,6 +5,7 @@
 #include "LGF/Window.h"
 #include "LGF/LGFMath.h"
 #include "LGF/Input.h"
+#include "LGF/Parameter.h"
 #include "LGF/Scene.h"
 #include "LGF/Collision.h"
 #include "LGF/Graphics.h"
