@@ -33,7 +33,7 @@ bool Framework::Initialize(const RuntimeConfig& config) {
 		.width = windowSetting.size.width,
 		.height = windowSetting.size.height,
 		.assetRoot = std::filesystem::absolute(config.assetRoot).lexically_normal(),
-		.enableFrameContexts = config.graphics.frameContextCount == 2u,
+		.multiFrameContextEnabled = config.graphics.multiFrameContextEnabled,
 		.vsyncEnabled = config.graphics.vsync,
 	};
 	if (!graphicsSystem_->Initialize(graphicsDesc)) {

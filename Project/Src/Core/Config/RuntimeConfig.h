@@ -37,7 +37,7 @@ namespace LGF {
 
 	struct GraphicsConfig {
 		bool vsync = true;
-		uint32_t frameContextCount = 2u;
+		bool multiFrameContextEnabled = true;
 	};
 
 	struct RuntimeConfig {

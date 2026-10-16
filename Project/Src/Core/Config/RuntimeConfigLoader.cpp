@@ -127,7 +127,8 @@ namespace {
 				<< "assetRoot = " << *assetRoot << "\n\n"
 				<< "[Graphics]\n"
 				<< "vsync = " << config.graphics.vsync << '\n'
-				<< "frameContextCount = " << config.graphics.frameContextCount << "\n\n"
+				<< "multiFrameContextEnabled = "
+				<< config.graphics.multiFrameContextEnabled << "\n\n"
 				<< "[Window]\n"
 				<< "title = " << *windowTitle << '\n'
 				<< "width = " << config.window.width << '\n'
@@ -253,10 +254,8 @@ std::optional<LGF::RuntimeConfig> LGF::LoadRuntimeConfig(
 				if (!ParseBool(value, config.graphics.vsync)) {
 					return std::nullopt;
 				}
-			} else if (section == "graphics" && key == "framecontextcount") {
-				if (!ParseUint32(value, config.graphics.frameContextCount) ||
-					(config.graphics.frameContextCount != 1u &&
-					 config.graphics.frameContextCount != 2u)) {
+			} else if (section == "graphics" && key == "multiframecontextenabled") {
+				if (!ParseBool(value, config.graphics.multiFrameContextEnabled)) {
 					return std::nullopt;
 				}
 			} else if (section == "window" && key == "title") {
