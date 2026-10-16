@@ -30,6 +30,16 @@ namespace LGF::Collision {
 	};
 
 	/// <summary>
+	/// startとendを上下の円の中心として表す円柱。
+	/// startとendは異なる位置にし、radiusは0以上で指定する。
+	/// </summary>
+	struct Cylinder {
+		Vector3 start{ 0.0f, -0.5f, 0.0f };
+		Vector3 end{ 0.0f, 0.5f, 0.0f };
+		float radius = 0.5f;
+	};
+
+	/// <summary>
 	/// レイ。direction は単位ベクトルでなくてもよい。
 	/// </summary>
 	struct Ray {

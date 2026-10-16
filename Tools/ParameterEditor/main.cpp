@@ -1,4 +1,6 @@
 #include <Windows.h>
+#include <ShlObj.h>
+#include <shobjidl.h>
 
 #include <LGF/LGF.h>
 
@@ -7,21 +9,163 @@
 #include <cstdio>
 #include <cstdlib>
 #include <filesystem>
+#include <fstream>
+#include <optional>
 #include <string>
 #include <type_traits>
 #include <utility>
 #include <vector>
 
 #include <imgui.h>
+#include <nlohmann/json.hpp>
 
 using namespace LGF;
 
 namespace {
+	using Json = nlohmann::json;
+
+	constexpr std::string_view kParameterDirectoryKey = "parameterDirectory";
+
+	std::filesystem::path GetPreferencesFilePath() {
+		PWSTR localAppDataPath = nullptr;
+		if (FAILED(SHGetKnownFolderPath(
+			FOLDERID_LocalAppData,
+			KF_FLAG_CREATE,
+			nullptr,
+			&localAppDataPath))) {
+			return {};
+		}
+
+		const std::filesystem::path preferencesFile =
+			std::filesystem::path(localAppDataPath) /
+			"Lazieal" /
+			"ParameterEditor" /
+			"settings.json";
+		CoTaskMemFree(localAppDataPath);
+		return preferencesFile;
+	}
+
+	std::optional<std::filesystem::path> LoadParameterDirectory() {
+		const std::filesystem::path preferencesFile = GetPreferencesFilePath();
+		if (preferencesFile.empty()) {
+			return std::nullopt;
+		}
+
+		try {
+			std::ifstream file(preferencesFile);
+			if (!file) {
+				return std::nullopt;
+			}
+
+			Json preferences;
+			file >> preferences;
+			if (!preferences.contains(kParameterDirectoryKey)) {
+				return std::nullopt;
+			}
+
+			const std::filesystem::path directory =
+				preferences.at(kParameterDirectoryKey).get<std::string>();
+			std::error_code error;
+			if (!std::filesystem::is_directory(directory, error)) {
+				return std::nullopt;
+			}
+			return directory;
+		} catch (...) {
+			return std::nullopt;
+		}
+	}
+
+	bool SaveParameterDirectory(const std::filesystem::path& directory) {
+		const std::filesystem::path preferencesFile = GetPreferencesFilePath();
+		if (preferencesFile.empty()) {
+			return false;
+		}
+
+		std::error_code error;
+		std::filesystem::create_directories(preferencesFile.parent_path(), error);
+		if (error) {
+			return false;
+		}
+
+		std::ofstream file(preferencesFile);
+		if (!file) {
+			return false;
+		}
+
+		const Json preferences{
+			{ kParameterDirectoryKey, directory.string() }
+		};
+		file << preferences.dump(4) << '\n';
+		return file.good();
+	}
+
+	std::optional<std::filesystem::path> SelectParameterDirectory(
+		HWND owner,
+		const std::filesystem::path& initialDirectory = {}) {
+		IFileDialog* dialog = nullptr;
+		if (FAILED(CoCreateInstance(
+			CLSID_FileOpenDialog,
+			nullptr,
+			CLSCTX_INPROC_SERVER,
+			IID_PPV_ARGS(&dialog)))) {
+			return std::nullopt;
+		}
+
+		DWORD options = 0;
+		HRESULT result = dialog->GetOptions(&options);
+		if (SUCCEEDED(result)) {
+			result = dialog->SetOptions(
+				options |
+				FOS_PICKFOLDERS |
+				FOS_FORCEFILESYSTEM |
+				FOS_PATHMUSTEXIST);
+		}
+		if (SUCCEEDED(result)) {
+			result = dialog->SetTitle(L"Select parameter directory");
+		}
+
+		IShellItem* initialFolder = nullptr;
+		if (SUCCEEDED(result) && !initialDirectory.empty()) {
+			if (SUCCEEDED(SHCreateItemFromParsingName(
+				initialDirectory.c_str(),
+				nullptr,
+				IID_PPV_ARGS(&initialFolder)))) {
+				dialog->SetFolder(initialFolder);
+				initialFolder->Release();
+			}
+		}
+
+		if (SUCCEEDED(result)) {
+			result = dialog->Show(owner);
+		}
+
+		IShellItem* selectedItem = nullptr;
+		if (SUCCEEDED(result)) {
+			result = dialog->GetResult(&selectedItem);
+		}
+
+		PWSTR selectedPath = nullptr;
+		if (SUCCEEDED(result)) {
+			result = selectedItem->GetDisplayName(SIGDN_FILESYSPATH, &selectedPath);
+		}
+
+		std::optional<std::filesystem::path> selectedDirectory;
+		if (SUCCEEDED(result)) {
+			selectedDirectory = std::filesystem::path(selectedPath);
+		}
+
+		CoTaskMemFree(selectedPath);
+		if (selectedItem) {
+			selectedItem->Release();
+		}
+		dialog->Release();
+		return selectedDirectory;
+	}
 
 	class ParameterEditorApp {
 	public:
-		ParameterEditorApp() {
-			std::snprintf(directoryBuffer_.data(), directoryBuffer_.size(), "Assets/Parameters");
+		explicit ParameterEditorApp(std::filesystem::path parameterDirectory)
+			: parameterDirectory_(std::move(parameterDirectory)) {
 			RefreshFiles();
 			if (!files_.empty()) {
 				Open(files_.front());
@@ -68,15 +212,14 @@ namespace {
 
 		void RefreshFiles() {
 			files_.clear();
-			const std::filesystem::path directory(directoryBuffer_.data());
 			std::error_code error;
-			if (!std::filesystem::exists(directory, error)) {
+			if (!std::filesystem::exists(parameterDirectory_, error)) {
 				SetStatus("The parameter directory does not exist yet.");
 				return;
 			}
 
 			for (const std::filesystem::directory_entry& entry :
-				std::filesystem::directory_iterator(directory, error)) {
+				std::filesystem::directory_iterator(parameterDirectory_, error)) {
 				if (error) {
 					SetStatus("Failed to enumerate the parameter directory.", true);
 					return;
@@ -149,7 +292,7 @@ namespace {
 			}
 
 			document_.Clear();
-			currentFile_ = std::filesystem::path(directoryBuffer_.data()) / name;
+			currentFile_ = parameterDirectory_ / name;
 			selectedParameter_.clear();
 			isDirty_ = true;
 			SetStatus("New parameter file created. Add a parameter and save it.");
@@ -157,35 +300,37 @@ namespace {
 
 		void DrawToolbar() {
 			constexpr float buttonWidth = 80.0f;
+			constexpr float changeButtonWidth = 100.0f;
 			constexpr ImGuiTableFlags tableFlags =
 				ImGuiTableFlags_SizingStretchProp |
 				ImGuiTableFlags_NoPadOuterX;
-			if (ImGui::BeginTable("Toolbar", 4, tableFlags)) {
+			if (ImGui::BeginTable("Toolbar", 5, tableFlags)) {
 				ImGui::TableSetupColumn("Directory", ImGuiTableColumnFlags_WidthStretch);
+				ImGui::TableSetupColumn("Change", ImGuiTableColumnFlags_WidthFixed, changeButtonWidth);
 				ImGui::TableSetupColumn("Refresh", ImGuiTableColumnFlags_WidthFixed, buttonWidth);
 				ImGui::TableSetupColumn("Save", ImGuiTableColumnFlags_WidthFixed, buttonWidth);
 				ImGui::TableSetupColumn("Reload", ImGuiTableColumnFlags_WidthFixed, buttonWidth);
 				ImGui::TableNextRow();
 
 				ImGui::TableSetColumnIndex(0);
-				ImGui::SetNextItemWidth(-1.0f);
-				ImGui::InputTextWithHint(
-					"##Directory",
-					"Parameter directory",
-					directoryBuffer_.data(),
-					directoryBuffer_.size());
+				ImGui::TextUnformatted(parameterDirectory_.string().c_str());
 
 				ImGui::TableSetColumnIndex(1);
+				if (ImGui::Button("Change...", ImVec2(-1.0f, 0.0f))) {
+					ChangeParameterDirectory();
+				}
+
+				ImGui::TableSetColumnIndex(2);
 				if (ImGui::Button("Refresh", ImVec2(-1.0f, 0.0f))) {
 					RefreshFiles();
 				}
 
-				ImGui::TableSetColumnIndex(2);
+				ImGui::TableSetColumnIndex(3);
 				if (ImGui::Button("Save", ImVec2(-1.0f, 0.0f))) {
 					Save();
 				}
 
-				ImGui::TableSetColumnIndex(3);
+				ImGui::TableSetColumnIndex(4);
 				if (ImGui::Button("Reload", ImVec2(-1.0f, 0.0f))) {
 					Reload();
 				}
@@ -196,6 +341,33 @@ namespace {
 				? ImVec4(1.0f, 0.35f, 0.30f, 1.0f)
 				: ImVec4(0.50f, 0.85f, 0.55f, 1.0f);
 			ImGui::TextColored(statusColor, "%s", status_.c_str());
+		}
+
+		void ChangeParameterDirectory() {
+			if (isDirty_) {
+				SetStatus(
+					"Save or reload the current file before changing the parameter directory.",
+					true);
+				return;
+			}
+
+			const std::optional<std::filesystem::path> selectedDirectory =
+				SelectParameterDirectory(GetActiveWindow(), parameterDirectory_);
+			if (!selectedDirectory) {
+				return;
+			}
+
+			parameterDirectory_ = *selectedDirectory;
+			document_.Clear();
+			currentFile_.clear();
+			selectedParameter_.clear();
+			RefreshFiles();
+
+			if (!SaveParameterDirectory(parameterDirectory_)) {
+				SetStatus(
+					"The directory was changed, but the preference could not be saved.",
+					true);
+			}
 		}
 
 		void DrawFileList() {
@@ -276,16 +448,8 @@ namespace {
 				const std::string path = parentPath.empty() ? name : parentPath + '/' + name;
 				if (child.data) {
 					const bool selected = path == selectedParameter_;
-					const std::string label = child.data->editor.label.empty()
-						? name
-						: child.data->editor.label + "##" + path;
-					if (ImGui::Selectable(label.c_str(), selected)) {
+					if (ImGui::Selectable(name.c_str(), selected)) {
 						selectedParameter_ = path;
-					}
-					if (
-						ImGui::IsItemHovered() &&
-						!child.data->editor.tooltip.empty()) {
-						ImGui::SetItemTooltip("%s", child.data->editor.tooltip.c_str());
 					}
 				} else if (ImGui::TreeNode(name.c_str())) {
 					DrawNode(child, path);
@@ -356,16 +520,6 @@ namespace {
 			return changed;
 		}
 
-		bool DrawString(const char* label, std::string& value) {
-			std::array<char, 1024> buffer{};
-			std::snprintf(buffer.data(), buffer.size(), "%s", value.c_str());
-			if (!ImGui::InputText(label, buffer.data(), buffer.size())) {
-				return false;
-			}
-			value = buffer.data();
-			return true;
-		}
-
 		void DrawSelectedParameter() {
 			ParameterData* data = document_.Find(selectedParameter_);
 			if (!data) {
@@ -381,8 +535,6 @@ namespace {
 			changed = DrawOptionalFloat("Minimum", data->editor.minimum) || changed;
 			changed = DrawOptionalFloat("Maximum", data->editor.maximum) || changed;
 			changed = DrawOptionalFloat("Step", data->editor.step) || changed;
-			changed = DrawString("Label", data->editor.label) || changed;
-			changed = DrawString("Tooltip", data->editor.tooltip) || changed;
 			isDirty_ = isDirty_ || changed;
 
 			ImGui::Spacing();
@@ -409,6 +561,7 @@ namespace {
 		}
 
 		ParameterDocument document_;
+		std::filesystem::path parameterDirectory_;
 		std::filesystem::path currentFile_;
 		std::vector<std::filesystem::path> files_;
 		std::string selectedParameter_;
@@ -416,23 +569,29 @@ namespace {
 		bool isStatusError_ = false;
 		bool isDirty_ = false;
 
-		std::array<char, 512> directoryBuffer_{};
 		std::array<char, 128> newFileName_{};
 		std::array<char, 512> newParameterPath_{};
 		int newParameterType_ = 2;
 	};
 
+	std::filesystem::path g_parameterDirectory;
+
 }
 
 void Main() {
 	Window::SetTitle(L"Lazieal Parameter Editor");
-	ParameterEditorApp editor;
+	ParameterEditorApp editor(g_parameterDirectory);
 	while (System::Update()) {
 		editor.Draw();
 	}
 }
 
 int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
+	const HRESULT comInitialization = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
+	if (FAILED(comInitialization)) {
+		return EXIT_FAILURE;
+	}
+
 	// このアプリ自身の絶対パスを取得する。
 	// 例: C:\Tools\ParameterEditor\LaziealParameterEditor.exe
 	std::array<wchar_t, 32768> executablePathBuffer{};
@@ -446,6 +605,7 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
 	if (
 		pathLength == 0u ||
 		pathLength >= static_cast<DWORD>(executablePathBuffer.size())) {
+		CoUninitialize();
 		return EXIT_FAILURE;
 	}
 
@@ -453,12 +613,34 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
 	const std::filesystem::path executableDirectory =
 		std::filesystem::path(executablePathBuffer.data()).parent_path();
 
-	// Assets/Parametersなどの相対パスを、アプリを起動した場所ではなく
+	// RuntimeSetting.iniやAssets/Frameworkを、アプリを起動した場所ではなく
 	// ParameterEditor.exeが置かれているフォルダから探せるようにする。
 	if (!SetCurrentDirectoryW(executableDirectory.c_str())) {
+		CoUninitialize();
 		return EXIT_FAILURE;
 	}
 
+	std::optional<std::filesystem::path> parameterDirectory = LoadParameterDirectory();
+	if (!parameterDirectory) {
+		parameterDirectory = SelectParameterDirectory(nullptr);
+		if (!parameterDirectory) {
+			CoUninitialize();
+			return EXIT_SUCCESS;
+		}
+		if (!SaveParameterDirectory(*parameterDirectory)) {
+			MessageBoxW(
+				nullptr,
+				L"Failed to save the selected parameter directory.",
+				L"Lazieal Parameter Editor",
+				MB_OK | MB_ICONERROR);
+			CoUninitialize();
+			return EXIT_FAILURE;
+		}
+	}
+	g_parameterDirectory = *parameterDirectory;
+
 	// ParameterEditor専用の設定ファイルを指定してLaziealを起動する。
-	return LGF::Run(Main, executableDirectory / "RuntimeSetting.ini");
+	const int exitCode = LGF::Run(Main, executableDirectory / "RuntimeSetting.ini");
+	CoUninitialize();
+	return exitCode;
 }

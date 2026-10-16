@@ -26,6 +26,7 @@ namespace LGF::Collision {
 	bool IsValid(const Sphere& sphere);
 	bool IsValid(const AABB& box);
 	bool IsValid(const Capsule& capsule);
+	bool IsValid(const Cylinder& cylinder);
 	bool IsValid(const Ray& ray);
 	bool IsValid(const Plane& plane);
 
@@ -35,6 +36,7 @@ namespace LGF::Collision {
 	bool Contains(const Sphere& sphere, const Vector3& point);
 	bool Contains(const AABB& box, const Vector3& point);
 	bool Contains(const Capsule& capsule, const Vector3& point);
+	bool Contains(const Cylinder& cylinder, const Vector3& point);
 
 	std::optional<Contact> Collide(const Sphere& first, const Sphere& second);
 	std::optional<Contact> Collide(const Sphere& sphere, const AABB& box);

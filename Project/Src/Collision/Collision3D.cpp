@@ -212,6 +212,12 @@ namespace LGF::Collision {
 		return capsule.radius >= 0.0f;
 	}
 
+	bool IsValid(const Cylinder& cylinder) {
+		return cylinder.radius >= 0.0f &&
+			Math::DistanceSq(cylinder.start, cylinder.end) >
+				Math::EPSILON * Math::EPSILON;
+	}
+
 	bool IsValid(const Ray& ray) {
 		return Math::LengthSq(ray.direction) > Math::EPSILON * Math::EPSILON;
 	}
@@ -260,6 +266,23 @@ namespace LGF::Collision {
 		}
 		const Vector3 closest = ClosestPoint(point, capsule);
 		return Math::DistanceSq(closest, point) <= capsule.radius * capsule.radius;
+	}
+
+	bool Contains(const Cylinder& cylinder, const Vector3& point) {
+		if (!IsValid(cylinder)) {
+			return false;
+		}
+
+		const Vector3 axis = cylinder.end - cylinder.start;
+		const float axisLengthSq = Math::LengthSq(axis);
+		const float t = Math::Dot(point - cylinder.start, axis) / axisLengthSq;
+		if (t < 0.0f || t > 1.0f) {
+			return false;
+		}
+
+		const Vector3 closestOnAxis = cylinder.start + axis * t;
+		return Math::DistanceSq(point, closestOnAxis) <=
+			cylinder.radius * cylinder.radius;
 	}
 
 	std::optional<Contact> Collide(const Sphere& first, const Sphere& second) {

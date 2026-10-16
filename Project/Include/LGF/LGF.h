@@ -8,5 +8,6 @@
 #include "LGF/Parameter.h"
 #include "LGF/Scene.h"
 #include "LGF/Collision.h"
+#include "LGF/Physics.h"
 #include "LGF/Graphics.h"
 #include "LGF/Graphics/DebugCamera3D.h"

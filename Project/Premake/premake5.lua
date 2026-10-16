@@ -98,6 +98,7 @@ project "LaziealParameterEditor"
         "../Include",
         graphicsProject .. "/Include",
         graphicsProject .. "/Externals/imgui",
+        graphicsProject .. "/Externals",
     }
 
     dependson {
@@ -119,6 +120,8 @@ project "LaziealParameterEditor"
         "dxguid",
         "dxcompiler",
         "winmm",
+        "ole32",
+        "shell32",
         "SDL3",
     }
 

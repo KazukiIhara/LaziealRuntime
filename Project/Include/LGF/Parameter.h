@@ -44,8 +44,6 @@ namespace LGF {
 		std::optional<float> minimum;
 		std::optional<float> maximum;
 		std::optional<float> step;
-		std::string label;
-		std::string tooltip;
 	};
 
 	/// <summary>

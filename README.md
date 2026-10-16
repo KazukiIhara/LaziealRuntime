@@ -29,6 +29,8 @@ git submodule update --init --recursive
 `LaziealParameterEditor`も生成されます。エディタのソースと専用設定は
 `Tools/ParameterEditor`にあり、ビルド後の実行一式は
 `generated/outputs/<構成>/x64/ParameterEditor`へ出力されます。
+初回起動時にパラメータディレクトリを選択し、以降は前回選択した場所を使用します。
+ディレクトリはツールバーの`Change...`から変更できます。
 
 ## 公開API
 
@@ -70,4 +72,45 @@ const LGF::ParameterIoResult result =
 if (result) {
     const float speed = parameters.GetOr<float>("Player/Speed", 1.0f);
 }
+```
+
+## 物理粒子
+
+`LGF::Physics::ParticleWorld`は、CPU上でPBDによる球形粒子の移動、粒子間衝突、
+摩擦、反発を計算します。`Collision::Sphere`または`Collision::AABB`を境界として
+登録すると、粒子をプリミティブの内側へ留められます。
+
+```cpp
+LGF::Physics::ParticleWorld particles;
+particles.AddBoundary(LGF::Collision::AABB{
+    .min = { -2.0f, 0.0f, -2.0f },
+    .max = { 2.0f, 4.0f, 2.0f },
+});
+
+const LGF::Physics::ParticleHandle particle = particles.Add({
+    .position = { 0.0f, 2.0f, 0.0f },
+    .radius = 0.05f,
+    .mass = 1.0f,
+});
+
+particles.Step(static_cast<float>(LGF::System::DeltaTime()));
+```
+
+境界には`Collision::AABB`、`Collision::Sphere`、`Collision::Cylinder`を
+使用できます。`ParticleBoundaryOptions::cuttingPlane`を指定すると、平面の法線が
+向いている側の表面が削除されます。切断面自体は衝突面にならないため、
+次の例では上側が開いた半球になります。
+
+```cpp
+LGF::Physics::ParticleBoundaryOptions bowlOptions{
+    .cuttingPlane = LGF::Collision::Plane{
+        // 上向きの法線を指定し、球の上側を削除する。
+        .normal = { 0.0f, 1.0f, 0.0f },
+        .distance = 0.0f,
+    },
+};
+
+particles.AddBoundary(
+    LGF::Collision::Sphere{ .center = {}, .radius = 2.0f },
+    bowlOptions);
 ```

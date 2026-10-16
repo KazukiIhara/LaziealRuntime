@@ -147,8 +147,6 @@ namespace {
 		if (json.contains("step")) {
 			result.step = json.at("step").get<float>();
 		}
-		result.label = json.value("label", std::string{});
-		result.tooltip = json.value("tooltip", std::string{});
 		return result;
 	}
 
@@ -235,12 +233,6 @@ namespace {
 		}
 		if (editor.step) {
 			result["step"] = *editor.step;
-		}
-		if (!editor.label.empty()) {
-			result["label"] = editor.label;
-		}
-		if (!editor.tooltip.empty()) {
-			result["tooltip"] = editor.tooltip;
 		}
 		return result;
 	}
