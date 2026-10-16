@@ -144,6 +144,7 @@ public:
 	};
 
 	bool Initialize(const GamepadConfig& config) {
+		config_ = config;
 		isEnabled_ = config.enabled;
 		if (!isEnabled_) {
 			return true;
@@ -340,12 +341,7 @@ private:
 			targetSlot->name = name;
 		}
 
-		EnableSensor(*targetSlot, SDL_SENSOR_GYRO, GamepadSensorType::Default, true);
-		EnableSensor(*targetSlot, SDL_SENSOR_ACCEL, GamepadSensorType::Default, false);
-		EnableSensor(*targetSlot, SDL_SENSOR_GYRO_L, GamepadSensorType::Left, true);
-		EnableSensor(*targetSlot, SDL_SENSOR_ACCEL_L, GamepadSensorType::Left, false);
-		EnableSensor(*targetSlot, SDL_SENSOR_GYRO_R, GamepadSensorType::Right, true);
-		EnableSensor(*targetSlot, SDL_SENSOR_ACCEL_R, GamepadSensorType::Right, false);
+		EnableConfiguredSensors(*targetSlot);
 		UpdateState(*targetSlot);
 		targetSlot->previousButtons = targetSlot->currentButtons;
 	}
@@ -387,6 +383,63 @@ private:
 			sensor.hasGyroscope = true;
 		} else {
 			sensor.hasAccelerometer = true;
+		}
+	}
+
+	void EnableConfiguredSensors(Slot& slot) {
+		if (IsLeftJoyCon(slot.type)) {
+			EnableJoyConSensors(
+				slot,
+				config_.joyCon.left,
+				SDL_SENSOR_GYRO,
+				SDL_SENSOR_ACCEL,
+				GamepadSensorType::Default);
+			return;
+		}
+		if (IsRightJoyCon(slot.type)) {
+			EnableJoyConSensors(
+				slot,
+				config_.joyCon.right,
+				SDL_SENSOR_GYRO,
+				SDL_SENSOR_ACCEL,
+				GamepadSensorType::Default);
+			return;
+		}
+		if (slot.type == GamepadType::JoyConPair) {
+			EnableJoyConSensors(
+				slot,
+				config_.joyCon.left,
+				SDL_SENSOR_GYRO_L,
+				SDL_SENSOR_ACCEL_L,
+				GamepadSensorType::Left);
+			EnableJoyConSensors(
+				slot,
+				config_.joyCon.right,
+				SDL_SENSOR_GYRO_R,
+				SDL_SENSOR_ACCEL_R,
+				GamepadSensorType::Right);
+			return;
+		}
+
+		EnableSensor(slot, SDL_SENSOR_GYRO, GamepadSensorType::Default, true);
+		EnableSensor(slot, SDL_SENSOR_ACCEL, GamepadSensorType::Default, false);
+		EnableSensor(slot, SDL_SENSOR_GYRO_L, GamepadSensorType::Left, true);
+		EnableSensor(slot, SDL_SENSOR_ACCEL_L, GamepadSensorType::Left, false);
+		EnableSensor(slot, SDL_SENSOR_GYRO_R, GamepadSensorType::Right, true);
+		EnableSensor(slot, SDL_SENSOR_ACCEL_R, GamepadSensorType::Right, false);
+	}
+
+	void EnableJoyConSensors(
+		Slot& slot,
+		const GamepadSensorConfig& config,
+		SDL_SensorType gyroscopeType,
+		SDL_SensorType accelerometerType,
+		GamepadSensorType gamepadSensorType) {
+		if (config.gyroscopeEnabled) {
+			EnableSensor(slot, gyroscopeType, gamepadSensorType, true);
+		}
+		if (config.accelerometerEnabled) {
+			EnableSensor(slot, accelerometerType, gamepadSensorType, false);
 		}
 	}
 
@@ -475,6 +528,7 @@ private:
 
 	bool isEnabled_ = false;
 	bool isInitialized_ = false;
+	GamepadConfig config_{};
 };
 
 GamepadSystem::GamepadSystem() :

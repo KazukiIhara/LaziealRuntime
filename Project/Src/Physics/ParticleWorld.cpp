@@ -5,38 +5,32 @@
 #include "LGF/Math/MathConstants.h"
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <type_traits>
 #include <unordered_map>
-#include <utility>
 
 namespace {
 
 	using namespace LGF;
 
-	struct GridCell {
-		int32_t x = 0;
-		int32_t y = 0;
-		int32_t z = 0;
-
-		bool operator==(const GridCell&) const = default;
-	};
-
-	struct GridCellHash {
-		std::size_t operator()(const GridCell& cell) const {
-			std::size_t result = std::hash<int32_t>{}(cell.x);
-			result ^= std::hash<int32_t>{}(cell.y) +
-				0x9e3779b9u + (result << 6u) + (result >> 2u);
-			result ^= std::hash<int32_t>{}(cell.z) +
-				0x9e3779b9u + (result << 6u) + (result >> 2u);
-			return result;
-		}
-	};
-
 	bool IsFinite(const Vector3& value) {
 		return std::isfinite(value.x) &&
 			std::isfinite(value.y) &&
 			std::isfinite(value.z);
+	}
+
+	Vector3 SafeNormal(const Vector3& value, const Vector3& fallback) {
+		const float lengthSq = Math::LengthSq(value);
+		if (lengthSq <= Math::EPSILON * Math::EPSILON) {
+			return fallback;
+		}
+		return value / std::sqrt(lengthSq);
+	}
+
+	uint32_t NextGeneration(uint32_t generation) {
+		++generation;
+		return generation == 0u ? 1u : generation;
 	}
 
 	LGF::Physics::CollisionParameter NormalizeCollisionParameter(
@@ -57,6 +51,14 @@ namespace {
 		if (!IsFinite(result.gravity)) {
 			result.gravity = { 0.0f, -9.8f, 0.0f };
 		}
+		if (!Collision::IsValid(result.worldBounds) ||
+			!IsFinite(result.worldBounds.min) ||
+			!IsFinite(result.worldBounds.max)) {
+			result.worldBounds = {
+				.min = { -100.0f, -100.0f, -100.0f },
+				.max = { 100.0f, 100.0f, 100.0f },
+			};
+		}
 		result.substepCount = std::max(result.substepCount, 1u);
 		result.solverIterationCount = std::max(result.solverIterationCount, 1u);
 		result.linearDamping = std::isfinite(result.linearDamping)
@@ -68,42 +70,39 @@ namespace {
 		return result;
 	}
 
-	bool IsBoundaryShapeValid(const LGF::Physics::ParticleBoundaryShape& shape) {
-		return std::visit([](const auto& value) {
-			return LGF::Collision::IsValid(value);
+	bool IsParticleDescValid(const LGF::Physics::ParticleDesc& desc) {
+		return IsFinite(desc.position) &&
+			IsFinite(desc.velocity) &&
+			std::isfinite(desc.radius) &&
+			desc.radius > 0.0f &&
+			std::isfinite(desc.mass) &&
+			desc.mass >= 0.0f;
+	}
+
+	bool IsColliderShapeValid(const LGF::Physics::StaticColliderShape& shape) {
+		return std::visit([](const auto& colliderShape) {
+			return Collision::IsValid(colliderShape);
 		}, shape);
 	}
 
-	bool IsBoundaryOptionsValid(const LGF::Physics::ParticleBoundaryOptions& options) {
-		return !options.cuttingPlane || LGF::Collision::IsValid(*options.cuttingPlane);
-	}
+	struct GridCell {
+		int32_t x = 0;
+		int32_t y = 0;
+		int32_t z = 0;
 
-	bool IsSurfaceRetained(
-		const Vector3& point,
-		const std::optional<LGF::Collision::Plane>& cuttingPlane) {
-		if (!cuttingPlane) {
-			return true;
+		bool operator==(const GridCell&) const = default;
+	};
+
+	struct GridCellHash {
+		std::size_t operator()(const GridCell& cell) const {
+			std::size_t result = std::hash<int32_t>{}(cell.x);
+			result ^= std::hash<int32_t>{}(cell.y) +
+				0x9e3779b9u + (result << 6u) + (result >> 2u);
+			result ^= std::hash<int32_t>{}(cell.z) +
+				0x9e3779b9u + (result << 6u) + (result >> 2u);
+			return result;
 		}
-
-		const float distance =
-			Math::Dot(cuttingPlane->normal, point) + cuttingPlane->distance;
-		return distance <= Math::EPSILON;
-	}
-
-	Vector3 SafeNormal(const Vector3& value, const Vector3& fallback) {
-		const float lengthSq = Math::LengthSq(value);
-		if (lengthSq <= Math::EPSILON * Math::EPSILON) {
-			return fallback;
-		}
-		return value / std::sqrt(lengthSq);
-	}
-
-	Vector3 Perpendicular(const Vector3& direction) {
-		const Vector3 reference = std::abs(direction.y) < 0.9f
-			? Vector3{ 0.0f, 1.0f, 0.0f }
-			: Vector3{ 1.0f, 0.0f, 0.0f };
-		return SafeNormal(Math::Cross(direction, reference), { 1.0f, 0.0f, 0.0f });
-	}
+	};
 
 	GridCell ToGridCell(const Vector3& position, float cellSize) {
 		return {
@@ -113,9 +112,71 @@ namespace {
 		};
 	}
 
-	uint32_t NextGeneration(uint32_t generation) {
-		++generation;
-		return generation == 0u ? 1u : generation;
+	struct StaticContact {
+		Vector3 normal{};
+		float penetrationDepth = 0.0f;
+	};
+
+	std::optional<StaticContact> FindContact(
+		const Collision::Sphere& particle,
+		const Collision::Sphere& collider) {
+		const Vector3 offset = particle.center - collider.center;
+		const float minimumDistance = particle.radius + collider.radius;
+		const float distanceSq = Math::LengthSq(offset);
+		if (distanceSq > minimumDistance * minimumDistance) {
+			return std::nullopt;
+		}
+		const float distance = std::sqrt(std::max(distanceSq, 0.0f));
+		return StaticContact{
+			.normal = SafeNormal(offset, { 0.0f, 1.0f, 0.0f }),
+			.penetrationDepth = minimumDistance - distance,
+		};
+	}
+
+	std::optional<StaticContact> FindContact(
+		const Collision::Sphere& particle,
+		const Collision::AABB& collider) {
+		const Vector3 closest = Collision::ClosestPoint(particle.center, collider);
+		const Vector3 offset = particle.center - closest;
+		const float distanceSq = Math::LengthSq(offset);
+		if (distanceSq > particle.radius * particle.radius) {
+			return std::nullopt;
+		}
+
+		if (distanceSq > Math::EPSILON * Math::EPSILON) {
+			const float distance = std::sqrt(distanceSq);
+			return StaticContact{
+				.normal = offset / distance,
+				.penetrationDepth = particle.radius - distance,
+			};
+		}
+
+		if (!Collision::Contains(collider, particle.center)) {
+			return std::nullopt;
+		}
+
+		const std::array<float, 6> distances{
+			particle.center.x - collider.min.x,
+			collider.max.x - particle.center.x,
+			particle.center.y - collider.min.y,
+			collider.max.y - particle.center.y,
+			particle.center.z - collider.min.z,
+			collider.max.z - particle.center.z,
+		};
+		const std::array<Vector3, 6> normals{
+			Vector3{ -1.0f, 0.0f, 0.0f },
+			Vector3{ 1.0f, 0.0f, 0.0f },
+			Vector3{ 0.0f, -1.0f, 0.0f },
+			Vector3{ 0.0f, 1.0f, 0.0f },
+			Vector3{ 0.0f, 0.0f, -1.0f },
+			Vector3{ 0.0f, 0.0f, 1.0f },
+		};
+		const auto nearest = std::min_element(distances.begin(), distances.end());
+		const std::size_t index = static_cast<std::size_t>(nearest - distances.begin());
+		return StaticContact{
+			.normal = normals[index],
+			.penetrationDepth = particle.radius + *nearest,
+		};
 	}
 
 }
@@ -123,24 +184,19 @@ namespace {
 namespace LGF::Physics {
 
 	bool ParticleHandle::IsValid() const {
-		return index != InvalidIndex;
+		return index != InvalidIndex && generation != 0u;
 	}
 
-	bool ParticleBoundaryHandle::IsValid() const {
-		return index != InvalidIndex;
+	bool StaticColliderHandle::IsValid() const {
+		return index != InvalidIndex && generation != 0u;
 	}
 
-	ParticleWorld::ParticleWorld(const ParticleWorldSettings& settings)
-		: settings_(NormalizeSettings(settings)) {}
+	ParticleWorld::ParticleWorld(const ParticleWorldSettings& settings) :
+		settings_(NormalizeSettings(settings)) {
+	}
 
 	ParticleHandle ParticleWorld::Add(const ParticleDesc& desc) {
-		if (
-			!IsFinite(desc.position) ||
-			!IsFinite(desc.velocity) ||
-			!std::isfinite(desc.radius) ||
-			!std::isfinite(desc.mass) ||
-			desc.radius <= 0.0f ||
-			desc.mass < 0.0f) {
+		if (!IsParticleDescValid(desc)) {
 			return {};
 		}
 
@@ -169,28 +225,26 @@ namespace LGF::Physics {
 			.occupied = true,
 		};
 		++particleCount_;
-		return { index, particle.generation };
+		return { index, generation };
 	}
 
 	bool ParticleWorld::Remove(ParticleHandle handle) {
-		ParticleSlot* particle = FindParticle(handle);
-		if (!particle) {
+		if (!FindParticle(handle)) {
 			return false;
 		}
-
-		particle->occupied = false;
-		particle->generation = NextGeneration(particle->generation);
-		freeParticleIndices_.push_back(handle.index);
-		--particleCount_;
+		RemoveParticleAt(handle.index);
 		return true;
 	}
 
 	void ParticleWorld::ClearParticles() {
 		freeParticleIndices_.clear();
+		freeParticleIndices_.reserve(particles_.size());
 		for (uint32_t index = 0u; index < particles_.size(); ++index) {
 			ParticleSlot& particle = particles_[index];
+			if (particle.occupied) {
+				particle.generation = NextGeneration(particle.generation);
+			}
 			particle.occupied = false;
-			particle.generation = NextGeneration(particle.generation);
 			freeParticleIndices_.push_back(index);
 		}
 		particleCount_ = 0u;
@@ -290,7 +344,7 @@ namespace LGF::Physics {
 
 	bool ParticleWorld::AddImpulse(ParticleHandle handle, const Vector3& impulse) {
 		ParticleSlot* particle = FindParticle(handle);
-		if (!particle || !IsFinite(impulse)) {
+		if (!particle || !IsFinite(impulse) || particle->inverseMass <= 0.0f) {
 			return false;
 		}
 		particle->velocity += impulse * particle->inverseMass;
@@ -335,120 +389,117 @@ namespace LGF::Physics {
 		}
 	}
 
-	ParticleBoundaryHandle ParticleWorld::AddBoundary(
-		const ParticleBoundaryShape& shape,
-		const ParticleBoundaryOptions& options) {
-		if (!IsBoundaryShapeValid(shape) || !IsBoundaryOptionsValid(options)) {
+	StaticColliderHandle ParticleWorld::AddCollider(
+		const StaticColliderShape& shape,
+		const StaticColliderOptions& options) {
+		if (!IsColliderShapeValid(shape)) {
 			return {};
 		}
 
 		uint32_t index = 0u;
-		if (freeBoundaryIndices_.empty()) {
-			index = static_cast<uint32_t>(boundaries_.size());
-			boundaries_.emplace_back();
+		if (freeColliderIndices_.empty()) {
+			index = static_cast<uint32_t>(colliders_.size());
+			colliders_.emplace_back();
 		} else {
-			index = freeBoundaryIndices_.back();
-			freeBoundaryIndices_.pop_back();
+			index = freeColliderIndices_.back();
+			freeColliderIndices_.pop_back();
 		}
 
-		BoundarySlot& boundary = boundaries_[index];
-		const uint32_t generation = boundary.generation;
-		boundary = BoundarySlot{
+		ColliderSlot& collider = colliders_[index];
+		const uint32_t generation = collider.generation;
+		collider = ColliderSlot{
 			.shape = shape,
 			.options = options,
 			.generation = generation,
 			.occupied = true,
 		};
-		boundary.options.collisionParameter =
-			NormalizeCollisionParameter(boundary.options.collisionParameter);
-		++boundaryCount_;
-		return { index, boundary.generation };
+		collider.options.collisionParameter =
+			NormalizeCollisionParameter(options.collisionParameter);
+		++colliderCount_;
+		return { index, generation };
 	}
 
-	ParticleBoundaryHandle ParticleWorld::AddBoundary(
+	StaticColliderHandle ParticleWorld::AddCollider(
 		const Collision::Sphere& sphere,
-		const ParticleBoundaryOptions& options) {
-		return AddBoundary(ParticleBoundaryShape{ sphere }, options);
+		const StaticColliderOptions& options) {
+		return AddCollider(StaticColliderShape{ sphere }, options);
 	}
 
-	ParticleBoundaryHandle ParticleWorld::AddBoundary(
+	StaticColliderHandle ParticleWorld::AddCollider(
 		const Collision::AABB& box,
-		const ParticleBoundaryOptions& options) {
-		return AddBoundary(ParticleBoundaryShape{ box }, options);
+		const StaticColliderOptions& options) {
+		return AddCollider(StaticColliderShape{ box }, options);
 	}
 
-	ParticleBoundaryHandle ParticleWorld::AddBoundary(
-		const Collision::Cylinder& cylinder,
-		const ParticleBoundaryOptions& options) {
-		return AddBoundary(ParticleBoundaryShape{ cylinder }, options);
-	}
-
-	bool ParticleWorld::RemoveBoundary(ParticleBoundaryHandle handle) {
-		BoundarySlot* boundary = FindBoundary(handle);
-		if (!boundary) {
+	bool ParticleWorld::RemoveCollider(StaticColliderHandle handle) {
+		ColliderSlot* collider = FindCollider(handle);
+		if (!collider) {
 			return false;
 		}
-		boundary->occupied = false;
-		boundary->generation = NextGeneration(boundary->generation);
-		freeBoundaryIndices_.push_back(handle.index);
-		--boundaryCount_;
+		collider->occupied = false;
+		collider->generation = NextGeneration(collider->generation);
+		freeColliderIndices_.push_back(handle.index);
+		--colliderCount_;
 		return true;
 	}
 
-	void ParticleWorld::ClearBoundaries() {
-		freeBoundaryIndices_.clear();
-		for (uint32_t index = 0u; index < boundaries_.size(); ++index) {
-			BoundarySlot& boundary = boundaries_[index];
-			boundary.occupied = false;
-			boundary.generation = NextGeneration(boundary.generation);
-			freeBoundaryIndices_.push_back(index);
+	void ParticleWorld::ClearColliders() {
+		freeColliderIndices_.clear();
+		freeColliderIndices_.reserve(colliders_.size());
+		for (uint32_t index = 0u; index < colliders_.size(); ++index) {
+			ColliderSlot& collider = colliders_[index];
+			if (collider.occupied) {
+				collider.generation = NextGeneration(collider.generation);
+			}
+			collider.occupied = false;
+			freeColliderIndices_.push_back(index);
 		}
-		boundaryCount_ = 0u;
+		colliderCount_ = 0u;
 	}
 
-	bool ParticleWorld::IsValid(ParticleBoundaryHandle handle) const {
-		return FindBoundary(handle) != nullptr;
+	bool ParticleWorld::IsValid(StaticColliderHandle handle) const {
+		return FindCollider(handle) != nullptr;
 	}
 
-	std::size_t ParticleWorld::GetBoundaryCount() const {
-		return boundaryCount_;
+	std::size_t ParticleWorld::GetColliderCount() const {
+		return colliderCount_;
 	}
 
-	bool ParticleWorld::SetBoundaryShape(
-		ParticleBoundaryHandle handle,
-		const ParticleBoundaryShape& shape) {
-		BoundarySlot* boundary = FindBoundary(handle);
-		if (!boundary || !IsBoundaryShapeValid(shape)) {
+	bool ParticleWorld::SetColliderShape(
+		StaticColliderHandle handle,
+		const StaticColliderShape& shape) {
+		ColliderSlot* collider = FindCollider(handle);
+		if (!collider || !IsColliderShapeValid(shape)) {
 			return false;
 		}
-		boundary->shape = shape;
+		collider->shape = shape;
 		return true;
 	}
 
-	bool ParticleWorld::SetBoundaryOptions(
-		ParticleBoundaryHandle handle,
-		const ParticleBoundaryOptions& options) {
-		BoundarySlot* boundary = FindBoundary(handle);
-		if (!boundary || !IsBoundaryOptionsValid(options)) {
+	bool ParticleWorld::SetColliderOptions(
+		StaticColliderHandle handle,
+		const StaticColliderOptions& options) {
+		ColliderSlot* collider = FindCollider(handle);
+		if (!collider) {
 			return false;
 		}
-		boundary->options = options;
-		boundary->options.collisionParameter =
+		collider->options = options;
+		collider->options.collisionParameter =
 			NormalizeCollisionParameter(options.collisionParameter);
 		return true;
 	}
 
-	const ParticleBoundaryShape* ParticleWorld::GetBoundaryShape(
-		ParticleBoundaryHandle handle) const {
-		const BoundarySlot* boundary = FindBoundary(handle);
-		return boundary ? &boundary->shape : nullptr;
+	const StaticColliderShape* ParticleWorld::GetColliderShape(
+		StaticColliderHandle handle) const {
+		const ColliderSlot* collider = FindCollider(handle);
+		return collider ? &collider->shape : nullptr;
 	}
 
-	std::optional<ParticleBoundaryOptions> ParticleWorld::GetBoundaryOptions(
-		ParticleBoundaryHandle handle) const {
-		const BoundarySlot* boundary = FindBoundary(handle);
-		return boundary
-			? std::optional<ParticleBoundaryOptions>(boundary->options)
+	std::optional<StaticColliderOptions> ParticleWorld::GetColliderOptions(
+		StaticColliderHandle handle) const {
+		const ColliderSlot* collider = FindCollider(handle);
+		return collider
+			? std::optional<StaticColliderOptions>(collider->options)
 			: std::nullopt;
 	}
 
@@ -462,7 +513,7 @@ namespace LGF::Physics {
 
 	void ParticleWorld::Clear() {
 		ClearParticles();
-		ClearBoundaries();
+		ClearColliders();
 	}
 
 	void ParticleWorld::Step(float deltaTime) {
@@ -474,7 +525,7 @@ namespace LGF::Physics {
 		const float substepTime = frameTime / static_cast<float>(settings_.substepCount);
 		const float damping = std::exp(-settings_.linearDamping * substepTime);
 
-		struct BoundaryContact {
+		struct ContactAccumulator {
 			Vector3 normal{};
 			float restitution = 0.0f;
 			float friction = 0.0f;
@@ -532,7 +583,7 @@ namespace LGF::Physics {
 		};
 
 		for (uint32_t substep = 0u; substep < settings_.substepCount; ++substep) {
-			std::vector<BoundaryContact> boundaryContacts(particles_.size());
+			std::vector<ContactAccumulator> contacts(particles_.size());
 
 			for (ParticleSlot& particle : particles_) {
 				if (!particle.occupied || !particle.enabled) {
@@ -549,23 +600,19 @@ namespace LGF::Physics {
 				particle.position += particle.velocity * substepTime;
 			}
 
-			auto recordBoundaryContact = [&](
+			auto recordContact = [&](
 				uint32_t particleIndex,
 				const Vector3& normal,
-				const CollisionParameter& particleCollisionParameter,
-				const CollisionParameter& boundaryCollisionParameter) {
-				BoundaryContact& contact = boundaryContacts[particleIndex];
+				const CollisionParameter& particleParameter,
+				const CollisionParameter& colliderParameter) {
+				ContactAccumulator& contact = contacts[particleIndex];
 				contact.normal += normal;
 				contact.restitution = std::max(
 					contact.restitution,
-					std::max(
-						particleCollisionParameter.restitution,
-						boundaryCollisionParameter.restitution));
+					std::max(particleParameter.restitution, colliderParameter.restitution));
 				contact.friction = std::max(
 					contact.friction,
-					std::sqrt(
-						particleCollisionParameter.friction *
-						boundaryCollisionParameter.friction));
+					std::sqrt(particleParameter.friction * colliderParameter.friction));
 				contact.collided = true;
 			};
 
@@ -608,207 +655,28 @@ namespace LGF::Physics {
 						continue;
 					}
 
-					for (const BoundarySlot& boundary : boundaries_) {
-						if (!boundary.occupied || !boundary.options.enabled) {
+					for (const ColliderSlot& collider : colliders_) {
+						if (!collider.occupied || !collider.options.enabled) {
 							continue;
 						}
-
+						const Collision::Sphere particleSphere{
+							.center = particle.position,
+							.radius = particle.radius,
+						};
 						std::visit([&](const auto& shape) {
-							using Shape = std::decay_t<decltype(shape)>;
-							if constexpr (std::is_same_v<Shape, Collision::Sphere>) {
-								const float allowedRadius = shape.radius - particle.radius;
-								if (allowedRadius < 0.0f) {
-									return;
-								}
-								const Vector3 offset = particle.position - shape.center;
-								const float distanceSq = Math::LengthSq(offset);
-								if (distanceSq <= allowedRadius * allowedRadius) {
-									return;
-								}
-								const Vector3 outward = SafeNormal(
-									offset,
-									{ 0.0f, 1.0f, 0.0f });
-								const Vector3 surfacePoint =
-									shape.center + outward * shape.radius;
-								if (!IsSurfaceRetained(
-									surfacePoint,
-									boundary.options.cuttingPlane)) {
-									return;
-								}
-								particle.position =
-									shape.center + outward * allowedRadius;
-								recordBoundaryContact(
-									particleIndex,
-									-outward,
-									particle.collisionParameter,
-									boundary.options.collisionParameter);
-							} else if constexpr (std::is_same_v<Shape, Collision::AABB>) {
-								const Vector3 minimum = shape.min + Vector3{
-									particle.radius,
-									particle.radius,
-									particle.radius,
-								};
-								const Vector3 maximum = shape.max - Vector3{
-									particle.radius,
-									particle.radius,
-									particle.radius,
-								};
-								if (
-									minimum.x > maximum.x ||
-									minimum.y > maximum.y ||
-									minimum.z > maximum.z) {
-									return;
-								}
-
-								const auto solveFace = [&] (
-									float& coordinate,
-									float limit,
-									bool isMinimum,
-									const Vector3& normal,
-									const Vector3& surfacePoint) {
-									const bool outside = isMinimum
-										? coordinate < limit
-										: coordinate > limit;
-									if (
-										!outside ||
-										!IsSurfaceRetained(
-											surfacePoint,
-											boundary.options.cuttingPlane)) {
-										return;
-									}
-									coordinate = limit;
-									recordBoundaryContact(
-										particleIndex,
-										normal,
-										particle.collisionParameter,
-										boundary.options.collisionParameter);
-								};
-
-								solveFace(
-									particle.position.x,
-									minimum.x,
-									true,
-									{ 1.0f, 0.0f, 0.0f },
-									{ shape.min.x,
-										std::clamp(particle.position.y, shape.min.y, shape.max.y),
-										std::clamp(particle.position.z, shape.min.z, shape.max.z) });
-								solveFace(
-									particle.position.x,
-									maximum.x,
-									false,
-									{ -1.0f, 0.0f, 0.0f },
-									{ shape.max.x,
-										std::clamp(particle.position.y, shape.min.y, shape.max.y),
-										std::clamp(particle.position.z, shape.min.z, shape.max.z) });
-								solveFace(
-									particle.position.y,
-									minimum.y,
-									true,
-									{ 0.0f, 1.0f, 0.0f },
-									{ std::clamp(particle.position.x, shape.min.x, shape.max.x),
-										shape.min.y,
-										std::clamp(particle.position.z, shape.min.z, shape.max.z) });
-								solveFace(
-									particle.position.y,
-									maximum.y,
-									false,
-									{ 0.0f, -1.0f, 0.0f },
-									{ std::clamp(particle.position.x, shape.min.x, shape.max.x),
-										shape.max.y,
-										std::clamp(particle.position.z, shape.min.z, shape.max.z) });
-								solveFace(
-									particle.position.z,
-									minimum.z,
-									true,
-									{ 0.0f, 0.0f, 1.0f },
-									{ std::clamp(particle.position.x, shape.min.x, shape.max.x),
-										std::clamp(particle.position.y, shape.min.y, shape.max.y),
-										shape.min.z });
-								solveFace(
-									particle.position.z,
-									maximum.z,
-									false,
-									{ 0.0f, 0.0f, -1.0f },
-									{ std::clamp(particle.position.x, shape.min.x, shape.max.x),
-										std::clamp(particle.position.y, shape.min.y, shape.max.y),
-										shape.max.z });
-							} else if constexpr (std::is_same_v<Shape, Collision::Cylinder>) {
-								const Vector3 axis = shape.end - shape.start;
-								const float axisLength = Math::Length(axis);
-								const float allowedRadius = shape.radius - particle.radius;
-								const float minimumHeight = particle.radius;
-								const float maximumHeight = axisLength - particle.radius;
-								if (
-									axisLength <= Math::EPSILON ||
-									allowedRadius < 0.0f ||
-									minimumHeight > maximumHeight) {
-									return;
-								}
-
-								const Vector3 axisDirection = axis / axisLength;
-								Vector3 offset = particle.position - shape.start;
-								float height = Math::Dot(offset, axisDirection);
-								Vector3 radial = offset - axisDirection * height;
-								float radialLength = Math::Length(radial);
-								const Vector3 radialDirection = SafeNormal(
-									radial,
-									Perpendicular(axisDirection));
-
-								if (radialLength > allowedRadius) {
-									const Vector3 surfacePoint =
-										shape.start +
-										axisDirection * std::clamp(height, 0.0f, axisLength) +
-										radialDirection * shape.radius;
-									if (IsSurfaceRetained(
-										surfacePoint,
-										boundary.options.cuttingPlane)) {
-										particle.position -=
-											radialDirection * (radialLength - allowedRadius);
-										recordBoundaryContact(
-											particleIndex,
-											-radialDirection,
-											particle.collisionParameter,
-											boundary.options.collisionParameter);
-									}
-								}
-
-								offset = particle.position - shape.start;
-								height = Math::Dot(offset, axisDirection);
-								radial = offset - axisDirection * height;
-								radialLength = Math::Length(radial);
-								const Vector3 clampedRadial = radialLength > shape.radius
-									? SafeNormal(radial, radialDirection) * shape.radius
-									: radial;
-
-								if (height < minimumHeight) {
-									const Vector3 surfacePoint = shape.start + clampedRadial;
-									if (IsSurfaceRetained(
-										surfacePoint,
-										boundary.options.cuttingPlane)) {
-										particle.position +=
-											axisDirection * (minimumHeight - height);
-										recordBoundaryContact(
-											particleIndex,
-											axisDirection,
-											particle.collisionParameter,
-											boundary.options.collisionParameter);
-									}
-								} else if (height > maximumHeight) {
-									const Vector3 surfacePoint = shape.end + clampedRadial;
-									if (IsSurfaceRetained(
-										surfacePoint,
-										boundary.options.cuttingPlane)) {
-										particle.position -=
-											axisDirection * (height - maximumHeight);
-										recordBoundaryContact(
-											particleIndex,
-											-axisDirection,
-											particle.collisionParameter,
-											boundary.options.collisionParameter);
-									}
-								}
+							const std::optional<StaticContact> contact =
+								FindContact(particleSphere, shape);
+							if (!contact || contact->penetrationDepth <= 0.0f) {
+								return;
 							}
-						}, boundary.shape);
+							particle.position +=
+								contact->normal * contact->penetrationDepth;
+							recordContact(
+								particleIndex,
+								contact->normal,
+								particle.collisionParameter,
+								collider.options.collisionParameter);
+						}, collider.shape);
 					}
 				}
 			}
@@ -826,13 +694,11 @@ namespace LGF::Physics {
 					(particle.position - particle.previousPosition) / substepTime;
 				particle.velocity *= damping;
 
-				const BoundaryContact& contact = boundaryContacts[index];
+				const ContactAccumulator& contact = contacts[index];
 				if (!contact.collided) {
 					continue;
 				}
-				const Vector3 normal = SafeNormal(
-					contact.normal,
-					{ 0.0f, 1.0f, 0.0f });
+				const Vector3 normal = SafeNormal(contact.normal, { 0.0f, 1.0f, 0.0f });
 				const float normalSpeed = Math::Dot(particle.velocity, normal);
 				if (normalSpeed < 0.0f) {
 					const Vector3 normalVelocity = normal * normalSpeed;
@@ -863,10 +729,9 @@ namespace LGF::Physics {
 					return;
 				}
 
-				const float restitution =
-					std::max(
-						first.collisionParameter.restitution,
-						second.collisionParameter.restitution);
+				const float restitution = std::max(
+					first.collisionParameter.restitution,
+					second.collisionParameter.restitution);
 				const float normalImpulseMagnitude =
 					-(1.0f + restitution) * normalSpeed / inverseMassSum;
 				const Vector3 normalImpulse = normal * normalImpulseMagnitude;
@@ -878,10 +743,9 @@ namespace LGF::Physics {
 				if (tangentSpeed <= Math::EPSILON) {
 					return;
 				}
-				const float friction =
-					std::sqrt(
-						first.collisionParameter.friction *
-						second.collisionParameter.friction);
+				const float friction = std::sqrt(
+					first.collisionParameter.friction *
+					second.collisionParameter.friction);
 				const float tangentImpulseMagnitude = std::min(
 					tangentSpeed / inverseMassSum,
 					friction * normalImpulseMagnitude);
@@ -892,9 +756,14 @@ namespace LGF::Physics {
 			});
 		}
 
-		for (ParticleSlot& particle : particles_) {
-			if (particle.occupied) {
-				particle.force = {};
+		for (uint32_t index = 0u; index < particles_.size(); ++index) {
+			ParticleSlot& particle = particles_[index];
+			if (!particle.occupied) {
+				continue;
+			}
+			particle.force = {};
+			if (!Collision::Contains(settings_.worldBounds, particle.position)) {
+				RemoveParticleAt(index);
 			}
 		}
 	}
@@ -920,26 +789,37 @@ namespace LGF::Physics {
 			: nullptr;
 	}
 
-	ParticleWorld::BoundarySlot* ParticleWorld::FindBoundary(
-		ParticleBoundaryHandle handle) {
-		if (!handle.IsValid() || handle.index >= boundaries_.size()) {
+	ParticleWorld::ColliderSlot* ParticleWorld::FindCollider(
+		StaticColliderHandle handle) {
+		if (!handle.IsValid() || handle.index >= colliders_.size()) {
 			return nullptr;
 		}
-		BoundarySlot& boundary = boundaries_[handle.index];
-		return boundary.occupied && boundary.generation == handle.generation
-			? &boundary
+		ColliderSlot& collider = colliders_[handle.index];
+		return collider.occupied && collider.generation == handle.generation
+			? &collider
 			: nullptr;
 	}
 
-	const ParticleWorld::BoundarySlot* ParticleWorld::FindBoundary(
-		ParticleBoundaryHandle handle) const {
-		if (!handle.IsValid() || handle.index >= boundaries_.size()) {
+	const ParticleWorld::ColliderSlot* ParticleWorld::FindCollider(
+		StaticColliderHandle handle) const {
+		if (!handle.IsValid() || handle.index >= colliders_.size()) {
 			return nullptr;
 		}
-		const BoundarySlot& boundary = boundaries_[handle.index];
-		return boundary.occupied && boundary.generation == handle.generation
-			? &boundary
+		const ColliderSlot& collider = colliders_[handle.index];
+		return collider.occupied && collider.generation == handle.generation
+			? &collider
 			: nullptr;
+	}
+
+	void ParticleWorld::RemoveParticleAt(uint32_t index) {
+		ParticleSlot& particle = particles_[index];
+		if (!particle.occupied) {
+			return;
+		}
+		particle.occupied = false;
+		particle.generation = NextGeneration(particle.generation);
+		freeParticleIndices_.push_back(index);
+		--particleCount_;
 	}
 
 }

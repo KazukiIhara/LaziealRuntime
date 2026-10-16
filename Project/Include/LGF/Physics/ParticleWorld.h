@@ -49,34 +49,30 @@ namespace LGF::Physics {
 
 	struct ParticleWorldSettings {
 		Vector3 gravity{ 0.0f, -9.8f, 0.0f };
+		Collision::AABB worldBounds{
+			.min = { -100.0f, -100.0f, -100.0f },
+			.max = { 100.0f, 100.0f, 100.0f },
+		};
 		uint32_t substepCount = 2u;
 		uint32_t solverIterationCount = 4u;
 		float linearDamping = 0.1f;
 		float maximumDeltaTime = 1.0f / 15.0f;
 	};
 
-	using ParticleBoundaryShape = std::variant<
-		Collision::Sphere,
-		Collision::AABB,
-		Collision::Cylinder>;
+	using StaticColliderShape = std::variant<Collision::Sphere, Collision::AABB>;
 
-	struct ParticleBoundaryHandle {
+	struct StaticColliderHandle {
 		static constexpr uint32_t InvalidIndex = std::numeric_limits<uint32_t>::max();
 
 		uint32_t index = InvalidIndex;
 		uint32_t generation = 0u;
 
 		bool IsValid() const;
-		bool operator==(const ParticleBoundaryHandle&) const = default;
+		bool operator==(const StaticColliderHandle&) const = default;
 	};
 
-	struct ParticleBoundaryOptions {
+	struct StaticColliderOptions {
 		CollisionParameter collisionParameter{};
-		/// <summary>
-		/// プリミティブを切断する平面。
-		/// 法線が向いている側の表面を削除し、切断面は塞がない。
-		/// </summary>
-		std::optional<Collision::Plane> cuttingPlane;
 		bool enabled = true;
 		uint64_t userData = 0u;
 	};
@@ -110,33 +106,29 @@ namespace LGF::Physics {
 		std::optional<ParticleState> GetState(ParticleHandle handle) const;
 		void GetStates(std::vector<ParticleState>& states) const;
 
-		ParticleBoundaryHandle AddBoundary(
-			const ParticleBoundaryShape& shape,
-			const ParticleBoundaryOptions& options = {});
-		ParticleBoundaryHandle AddBoundary(
+		StaticColliderHandle AddCollider(
+			const StaticColliderShape& shape,
+			const StaticColliderOptions& options = {});
+		StaticColliderHandle AddCollider(
 			const Collision::Sphere& sphere,
-			const ParticleBoundaryOptions& options = {});
-		ParticleBoundaryHandle AddBoundary(
+			const StaticColliderOptions& options = {});
+		StaticColliderHandle AddCollider(
 			const Collision::AABB& box,
-			const ParticleBoundaryOptions& options = {});
-		ParticleBoundaryHandle AddBoundary(
-			const Collision::Cylinder& cylinder,
-			const ParticleBoundaryOptions& options = {});
-		bool RemoveBoundary(ParticleBoundaryHandle handle);
-		void ClearBoundaries();
+			const StaticColliderOptions& options = {});
+		bool RemoveCollider(StaticColliderHandle handle);
+		void ClearColliders();
 
-		bool IsValid(ParticleBoundaryHandle handle) const;
-		std::size_t GetBoundaryCount() const;
-		bool SetBoundaryShape(
-			ParticleBoundaryHandle handle,
-			const ParticleBoundaryShape& shape);
-		bool SetBoundaryOptions(
-			ParticleBoundaryHandle handle,
-			const ParticleBoundaryOptions& options);
-		const ParticleBoundaryShape* GetBoundaryShape(
-			ParticleBoundaryHandle handle) const;
-		std::optional<ParticleBoundaryOptions> GetBoundaryOptions(
-			ParticleBoundaryHandle handle) const;
+		bool IsValid(StaticColliderHandle handle) const;
+		std::size_t GetColliderCount() const;
+		bool SetColliderShape(
+			StaticColliderHandle handle,
+			const StaticColliderShape& shape);
+		bool SetColliderOptions(
+			StaticColliderHandle handle,
+			const StaticColliderOptions& options);
+		const StaticColliderShape* GetColliderShape(StaticColliderHandle handle) const;
+		std::optional<StaticColliderOptions> GetColliderOptions(
+			StaticColliderHandle handle) const;
 
 		void SetSettings(const ParticleWorldSettings& settings);
 		const ParticleWorldSettings& GetSettings() const;
@@ -159,25 +151,26 @@ namespace LGF::Physics {
 			bool occupied = false;
 		};
 
-		struct BoundarySlot {
-			ParticleBoundaryShape shape{};
-			ParticleBoundaryOptions options{};
+		struct ColliderSlot {
+			StaticColliderShape shape{};
+			StaticColliderOptions options{};
 			uint32_t generation = 1u;
 			bool occupied = false;
 		};
 
 		ParticleSlot* FindParticle(ParticleHandle handle);
 		const ParticleSlot* FindParticle(ParticleHandle handle) const;
-		BoundarySlot* FindBoundary(ParticleBoundaryHandle handle);
-		const BoundarySlot* FindBoundary(ParticleBoundaryHandle handle) const;
+		ColliderSlot* FindCollider(StaticColliderHandle handle);
+		const ColliderSlot* FindCollider(StaticColliderHandle handle) const;
+		void RemoveParticleAt(uint32_t index);
 
 		ParticleWorldSettings settings_{};
 		std::vector<ParticleSlot> particles_;
 		std::vector<uint32_t> freeParticleIndices_;
-		std::vector<BoundarySlot> boundaries_;
-		std::vector<uint32_t> freeBoundaryIndices_;
+		std::vector<ColliderSlot> colliders_;
+		std::vector<uint32_t> freeColliderIndices_;
 		std::size_t particleCount_ = 0u;
-		std::size_t boundaryCount_ = 0u;
+		std::size_t colliderCount_ = 0u;
 	};
 
 }

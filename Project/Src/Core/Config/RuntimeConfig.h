@@ -13,11 +13,22 @@ namespace LGF {
 		bool fullscreen = false;
 	};
 
+	struct GamepadSensorConfig {
+		bool gyroscopeEnabled = true;
+		bool accelerometerEnabled = true;
+	};
+
+	struct JoyConConfig {
+		GamepadSensorConfig left{};
+		GamepadSensorConfig right{};
+	};
+
 	struct GamepadConfig {
 		bool enabled = true;
 		bool combineJoyCons = false;
 		bool verticalJoyCons = true;
 		bool backgroundInput = false;
+		JoyConConfig joyCon{};
 	};
 
 	struct InputConfig {

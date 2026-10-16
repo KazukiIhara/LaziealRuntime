@@ -170,6 +170,22 @@ std::optional<LGF::RuntimeConfig> LGF::LoadRuntimeConfig(
 			if (!ParseBool(value, config.input.gamepad.backgroundInput)) {
 				return std::nullopt;
 			}
+		} else if (section == "input.gamepad.joycon.left" && key == "gyroscopeenabled") {
+			if (!ParseBool(value, config.input.gamepad.joyCon.left.gyroscopeEnabled)) {
+				return std::nullopt;
+			}
+		} else if (section == "input.gamepad.joycon.left" && key == "accelerometerenabled") {
+			if (!ParseBool(value, config.input.gamepad.joyCon.left.accelerometerEnabled)) {
+				return std::nullopt;
+			}
+		} else if (section == "input.gamepad.joycon.right" && key == "gyroscopeenabled") {
+			if (!ParseBool(value, config.input.gamepad.joyCon.right.gyroscopeEnabled)) {
+				return std::nullopt;
+			}
+		} else if (section == "input.gamepad.joycon.right" && key == "accelerometerenabled") {
+			if (!ParseBool(value, config.input.gamepad.joyCon.right.accelerometerEnabled)) {
+				return std::nullopt;
+			}
 		}
 	}
 

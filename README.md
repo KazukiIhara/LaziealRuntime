@@ -90,41 +90,35 @@ if (result) {
 
 ## 物理粒子
 
-`LGF::Physics::ParticleWorld`は、CPU上でPBDによる球形粒子の移動、粒子間衝突、
-摩擦、反発を計算します。`Collision::Sphere`または`Collision::AABB`を境界として
-登録すると、粒子をプリミティブの内側へ留められます。
+`LGF::Physics::ParticleWorld`は、CPU上で球形粒子の落下、粒子間衝突、
+静的コライダーとの衝突、摩擦、反発を計算する簡易物理シミュレーターです。
+静的コライダーには`Collision::Sphere`と`Collision::AABB`を使用できます。
 
 ```cpp
-LGF::Physics::ParticleWorld particles;
-particles.AddBoundary(LGF::Collision::AABB{
-    .min = { -2.0f, 0.0f, -2.0f },
-    .max = { 2.0f, 4.0f, 2.0f },
+LGF::Physics::ParticleWorld particles({
+    .worldBounds = {
+        .min = { -20.0f, -10.0f, -20.0f },
+        .max = { 20.0f, 20.0f, 20.0f },
+    },
+});
+
+particles.AddCollider(LGF::Collision::AABB{
+    .min = { -5.0f, -0.5f, -5.0f },
+    .max = { 5.0f, 0.0f, 5.0f },
 });
 
 const LGF::Physics::ParticleHandle particle = particles.Add({
     .position = { 0.0f, 2.0f, 0.0f },
     .radius = 0.05f,
     .mass = 1.0f,
+    .collisionParameter = {
+        .restitution = 0.2f,
+        .friction = 0.5f,
+    },
 });
 
 particles.Step(static_cast<float>(LGF::System::DeltaTime()));
 ```
 
-境界には`Collision::AABB`、`Collision::Sphere`、`Collision::Cylinder`を
-使用できます。`ParticleBoundaryOptions::cuttingPlane`を指定すると、平面の法線が
-向いている側の表面が削除されます。切断面自体は衝突面にならないため、
-次の例では上側が開いた半球になります。
-
-```cpp
-LGF::Physics::ParticleBoundaryOptions bowlOptions{
-    .cuttingPlane = LGF::Collision::Plane{
-        // 上向きの法線を指定し、球の上側を削除する。
-        .normal = { 0.0f, 1.0f, 0.0f },
-        .distance = 0.0f,
-    },
-};
-
-particles.AddBoundary(
-    LGF::Collision::Sphere{ .center = {}, .radius = 2.0f },
-    bowlOptions);
-```
+粒子の中心が`ParticleWorldSettings::worldBounds`を越えると、
+その粒子はワールドから自動的に削除されます。
