@@ -16,6 +16,21 @@ using namespace LGF;
 namespace {
 
 	using Json = nlohmann::json;
+	constexpr std::string_view kDefaultParameterDirectory = "Assets/Parameters";
+
+	std::map<std::filesystem::path, ParameterDocument>& GetParameterCache() {
+		static std::map<std::filesystem::path, ParameterDocument> cache;
+		return cache;
+	}
+
+	std::filesystem::path ResolveParameterFilePath(
+		const std::filesystem::path& fileName) {
+		if (fileName.is_absolute()) {
+			return fileName.lexically_normal();
+		}
+		return (std::filesystem::path(kDefaultParameterDirectory) / fileName)
+			.lexically_normal();
+	}
 
 	ParameterIoResult MakeError(std::string message) {
 		return ParameterIoResult{
@@ -406,6 +421,52 @@ ParameterNode& ParameterDocument::GetRoot() {
 
 const ParameterNode& ParameterDocument::GetRoot() const {
 	return root_;
+}
+
+std::mutex& Parameter::GetCacheMutex() {
+	static std::mutex mutex;
+	return mutex;
+}
+
+const ParameterDocument* Parameter::GetOrLoadDocument(
+	const std::filesystem::path& fileName,
+	std::string& errorMessage) {
+	const std::filesystem::path filePath = ResolveParameterFilePath(fileName);
+	auto& cache = GetParameterCache();
+	if (const auto iterator = cache.find(filePath); iterator != cache.end()) {
+		return &iterator->second;
+	}
+
+	ParameterDocument document;
+	const ParameterIoResult result = document.Load(filePath);
+	if (!result) {
+		errorMessage = result.message;
+		return nullptr;
+	}
+
+	const auto [iterator, inserted] =
+		cache.emplace(filePath, std::move(document));
+	(void)inserted;
+	return &iterator->second;
+}
+
+ParameterIoResult Parameter::Reload(const std::filesystem::path& fileName) {
+	std::scoped_lock lock(GetCacheMutex());
+	const std::filesystem::path filePath = ResolveParameterFilePath(fileName);
+
+	ParameterDocument document;
+	const ParameterIoResult result = document.Load(filePath);
+	if (!result) {
+		return result;
+	}
+
+	GetParameterCache().insert_or_assign(filePath, std::move(document));
+	return result;
+}
+
+void Parameter::ClearCache() {
+	std::scoped_lock lock(GetCacheMutex());
+	GetParameterCache().clear();
 }
 
 ParameterType LGF::GetParameterType(const ParameterValue& value) {

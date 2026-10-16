@@ -5,9 +5,12 @@
 #include <cstdint>
 #include <filesystem>
 #include <map>
+#include <mutex>
 #include <optional>
+#include <stdexcept>
 #include <string>
 #include <string_view>
+#include <type_traits>
 #include <variant>
 
 namespace LGF {
@@ -120,5 +123,103 @@ namespace LGF {
 
 	ParameterType GetParameterType(const ParameterValue& value);
 	std::string_view ToString(ParameterType type);
+
+	/// <summary>
+	/// Assets/Parameters内のパラメータを簡単に取得するための静的API
+	/// </summary>
+	class Parameter {
+	public:
+		template <class T>
+		static T Get(
+			const std::filesystem::path& fileName,
+			std::string_view parameterPath) {
+			ValidateType<T>();
+			std::scoped_lock lock(GetCacheMutex());
+
+			std::string loadError;
+			const ParameterDocument* document = GetOrLoadDocument(fileName, loadError);
+			if (!document) {
+				throw std::runtime_error(loadError);
+			}
+
+			const ParameterData* data = document->Find(parameterPath);
+			if (!data) {
+				throw std::runtime_error(
+					"Parameter not found. File: " + fileName.string() +
+					", Path: " + std::string(parameterPath));
+			}
+
+			const T* value = std::get_if<T>(&data->value);
+			if (!value) {
+				throw std::runtime_error(
+					"Parameter type mismatch. File: " + fileName.string() +
+					", Path: " + std::string(parameterPath) +
+					", Expected: " + std::string(GetTypeName<T>()) +
+					", Actual: " + std::string(ToString(GetParameterType(data->value))));
+			}
+			return *value;
+		}
+
+		template <class T>
+		static T GetOr(
+			const std::filesystem::path& fileName,
+			std::string_view parameterPath,
+			const T& defaultValue) {
+			return TryGet<T>(fileName, parameterPath).value_or(defaultValue);
+		}
+
+		template <class T>
+		static std::optional<T> TryGet(
+			const std::filesystem::path& fileName,
+			std::string_view parameterPath) {
+			ValidateType<T>();
+			std::scoped_lock lock(GetCacheMutex());
+
+			std::string loadError;
+			const ParameterDocument* document = GetOrLoadDocument(fileName, loadError);
+			return document ? document->Get<T>(parameterPath) : std::nullopt;
+		}
+
+		static ParameterIoResult Reload(const std::filesystem::path& fileName);
+		static void ClearCache();
+
+	private:
+		template <class T>
+		static constexpr void ValidateType() {
+			static_assert(
+				std::is_same_v<T, bool> ||
+				std::is_same_v<T, int32_t> ||
+				std::is_same_v<T, float> ||
+				std::is_same_v<T, Vector2> ||
+				std::is_same_v<T, Vector3> ||
+				std::is_same_v<T, Vector4> ||
+				std::is_same_v<T, std::string>,
+				"T is not a supported parameter type");
+		}
+
+		template <class T>
+		static constexpr std::string_view GetTypeName() {
+			if constexpr (std::is_same_v<T, bool>) {
+				return "Bool";
+			} else if constexpr (std::is_same_v<T, int32_t>) {
+				return "Int32";
+			} else if constexpr (std::is_same_v<T, float>) {
+				return "Float";
+			} else if constexpr (std::is_same_v<T, Vector2>) {
+				return "Vector2";
+			} else if constexpr (std::is_same_v<T, Vector3>) {
+				return "Vector3";
+			} else if constexpr (std::is_same_v<T, Vector4>) {
+				return "Vector4";
+			} else {
+				return "String";
+			}
+		}
+
+		static std::mutex& GetCacheMutex();
+		static const ParameterDocument* GetOrLoadDocument(
+			const std::filesystem::path& fileName,
+			std::string& errorMessage);
+	};
 
 }

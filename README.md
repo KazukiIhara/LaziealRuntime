@@ -61,6 +61,20 @@ void Main() {
 
 ## JSONパラメータ
 
+`LGF::Parameter`は、`Assets/Parameters`内のJSONを初回アクセス時に読み込み、
+キャッシュした値を静的APIから返します。
+
+```cpp
+const LGF::Vector3 position =
+    LGF::Parameter::Get<LGF::Vector3>("Sphere.json", "Pos");
+const float speed =
+    LGF::Parameter::GetOr<float>("Player.json", "Speed", 1.0f);
+```
+
+`Get`はファイル、パラメータ、型のいずれかが不正な場合に例外を送出します。
+失敗を許容する場合は`TryGet`、既定値を使用する場合は`GetOr`を使用します。
+`Reload`で個別のファイルを再読み込みでき、`ClearCache`で全キャッシュを破棄できます。
+
 `LGF::ParameterDocument`は、`/`区切りのパスで階層パラメータを扱います。
 JSONの解析に失敗した場合は`ParameterIoResult`に理由が格納され、読み込み前の
 ドキュメントは変更されません。
