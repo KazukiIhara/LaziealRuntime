@@ -125,6 +125,9 @@ namespace {
 			file << std::boolalpha
 				<< "[Runtime]\n"
 				<< "assetRoot = " << *assetRoot << "\n\n"
+				<< "[Graphics]\n"
+				<< "vsync = " << config.graphics.vsync << '\n'
+				<< "frameContextCount = " << config.graphics.frameContextCount << "\n\n"
 				<< "[Window]\n"
 				<< "title = " << *windowTitle << '\n'
 				<< "width = " << config.window.width << '\n'
@@ -246,6 +249,16 @@ std::optional<LGF::RuntimeConfig> LGF::LoadRuntimeConfig(
 					return std::nullopt;
 				}
 				config.assetRoot = *assetRoot;
+			} else if (section == "graphics" && key == "vsync") {
+				if (!ParseBool(value, config.graphics.vsync)) {
+					return std::nullopt;
+				}
+			} else if (section == "graphics" && key == "framecontextcount") {
+				if (!ParseUint32(value, config.graphics.frameContextCount) ||
+					(config.graphics.frameContextCount != 1u &&
+					 config.graphics.frameContextCount != 2u)) {
+					return std::nullopt;
+				}
 			} else if (section == "window" && key == "title") {
 				const std::optional<std::wstring> title = Utf8ToWide(value);
 				if (!title) {

@@ -35,9 +35,15 @@ namespace LGF {
 		GamepadConfig gamepad{};
 	};
 
+	struct GraphicsConfig {
+		bool vsync = true;
+		uint32_t frameContextCount = 2u;
+	};
+
 	struct RuntimeConfig {
 		std::filesystem::path assetRoot = "Assets";
 		WindowConfig window{};
+		GraphicsConfig graphics{};
 		InputConfig input{};
 	};
 
