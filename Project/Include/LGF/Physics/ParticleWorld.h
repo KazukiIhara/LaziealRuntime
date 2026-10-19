@@ -11,21 +11,24 @@
 
 namespace LGF::Physics {
 
+	/// <summary>登録された粒子を識別するハンドル</summary>
 	struct ParticleHandle {
 		static constexpr uint32_t InvalidIndex = std::numeric_limits<uint32_t>::max();
 
 		uint32_t index = InvalidIndex;
-		uint32_t generation = 0u;
+		uint32_t generation{};
 
 		bool IsValid() const;
 		bool operator==(const ParticleHandle&) const = default;
 	};
 
+	/// <summary>反発と摩擦の係数</summary>
 	struct CollisionParameter {
 		float restitution = 0.1f;
 		float friction = 0.4f;
 	};
 
+	/// <summary>粒子の登録パラメータ</summary>
 	struct ParticleDesc {
 		Vector3 position{};
 		Vector3 velocity{};
@@ -33,20 +36,22 @@ namespace LGF::Physics {
 		float mass = 1.0f;
 		CollisionParameter collisionParameter{};
 		bool enabled = true;
-		uint64_t userData = 0u;
+		uint64_t userData{};
 	};
 
+	/// <summary>登録されている粒子の状態</summary>
 	struct ParticleState {
 		ParticleHandle handle{};
 		Vector3 position{};
 		Vector3 velocity{};
-		float radius = 0.0f;
-		float mass = 0.0f;
+		float radius{};
+		float mass{};
 		CollisionParameter collisionParameter{};
-		bool enabled = false;
-		uint64_t userData = 0u;
+		bool enabled{};
+		uint64_t userData{};
 	};
 
+	/// <summary>物理ワールドのシミュレーション設定</summary>
 	struct ParticleWorldSettings {
 		Vector3 gravity{ 0.0f, -9.8f, 0.0f };
 		Collision::AABB worldBounds{
@@ -63,16 +68,18 @@ namespace LGF::Physics {
 		float maximumDeltaTime = 1.0f / 15.0f;
 	};
 
-	// 直前のStepで計測した処理時間と衝突候補数。
-	// 時間の単位はすべてミリ秒で、候補数は全サブステップの合計を表す。
+	/// <summary>
+	/// 直前のStepで計測した処理時間と衝突候補数
+	/// 時間の単位はミリ秒、候補数は全サブステップの合計
+	/// </summary>
 	struct ParticleWorldStepStatistics {
-		double totalMilliseconds = 0.0;
-		double integrationMilliseconds = 0.0;
-		double broadPhaseMilliseconds = 0.0;
-		double positionSolveMilliseconds = 0.0;
-		double velocitySolveMilliseconds = 0.0;
-		double cleanupMilliseconds = 0.0;
-		uint64_t candidatePairCount = 0u;
+		double totalMilliseconds{};
+		double integrationMilliseconds{};
+		double broadPhaseMilliseconds{};
+		double positionSolveMilliseconds{};
+		double velocitySolveMilliseconds{};
+		double cleanupMilliseconds{};
+		uint64_t candidatePairCount{};
 	};
 
 	using StaticColliderShape = std::variant<
@@ -81,22 +88,27 @@ namespace LGF::Physics {
 		Collision::SphericalShellCap,
 		Collision::AABB>;
 
+	/// <summary>登録された静的コライダーを識別するハンドル</summary>
 	struct StaticColliderHandle {
 		static constexpr uint32_t InvalidIndex = std::numeric_limits<uint32_t>::max();
 
 		uint32_t index = InvalidIndex;
-		uint32_t generation = 0u;
+		uint32_t generation{};
 
 		bool IsValid() const;
 		bool operator==(const StaticColliderHandle&) const = default;
 	};
 
+	/// <summary>静的コライダーの登録パラメータ</summary>
 	struct StaticColliderOptions {
 		CollisionParameter collisionParameter{};
 		bool enabled = true;
-		uint64_t userData = 0u;
+		uint64_t userData{};
 	};
 
+	/// <summary>
+	/// 球形粒子の移動と衝突解決を管理する物理ワールド
+	/// </summary>
 	class ParticleWorld {
 	public:
 		explicit ParticleWorld(const ParticleWorldSettings& settings = {});
@@ -161,22 +173,22 @@ namespace LGF::Physics {
 		const ParticleWorldStepStatistics& GetLastStepStatistics() const;
 
 		void Clear();
-		// 指定時間だけシミュレーションを進め、衝突解決と範囲外粒子の削除を行う。
+		/// <summary>衝突解決を行い、指定時間だけシミュレーションを進める</summary>
 		void Step(float deltaTime);
 
 	private:
 		struct ParticlePair {
-			uint32_t firstIndex = 0u;
-			uint32_t secondIndex = 0u;
+			uint32_t firstIndex{};
+			uint32_t secondIndex{};
 		};
 
 		struct ContactAccumulator {
 			Vector3 normal{};
 			Vector3 surfaceVelocity{};
-			float restitution = 0.0f;
-			float friction = 0.0f;
-			uint32_t contactCount = 0u;
-			bool collided = false;
+			float restitution{};
+			float friction{};
+			uint32_t contactCount{};
+			bool hasCollision{};
 		};
 
 		struct ParticleSlot {
@@ -187,10 +199,10 @@ namespace LGF::Physics {
 			float inverseMass = 1.0f;
 			float radius = 0.05f;
 			CollisionParameter collisionParameter{};
-			uint64_t userData = 0u;
+			uint64_t userData{};
 			uint32_t generation = 1u;
-			bool enabled = true;
-			bool occupied = false;
+			bool isEnabled = true;
+			bool isOccupied{};
 		};
 
 		struct ColliderSlot {
@@ -198,7 +210,7 @@ namespace LGF::Physics {
 			StaticColliderShape previousShape{};
 			StaticColliderOptions options{};
 			uint32_t generation = 1u;
-			bool occupied = false;
+			bool isOccupied{};
 		};
 
 		ParticleSlot* FindParticle(ParticleHandle handle);
@@ -229,8 +241,8 @@ namespace LGF::Physics {
 		std::vector<uint32_t> freeParticleIndices_;
 		std::vector<ColliderSlot> colliders_;
 		std::vector<uint32_t> freeColliderIndices_;
-		std::size_t particleCount_ = 0u;
-		std::size_t colliderCount_ = 0u;
+		std::size_t particleCount_{};
+		std::size_t colliderCount_{};
 		ParticleWorldStepStatistics lastStepStatistics_{};
 	};
 

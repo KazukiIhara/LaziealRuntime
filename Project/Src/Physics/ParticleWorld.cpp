@@ -1,17 +1,17 @@
 #include "LGF/Physics/ParticleWorld.h"
 
-#include "../Collision/CollisionUtility.h"
-#include "../Core/HandleUtility.h"
-#include "LGF/Collision/Collision3D.h"
-#include "LGF/Math/Functions/VectorMath.h"
-#include "LGF/Math/MathConstants.h"
-
 #include <algorithm>
 #include <array>
 #include <chrono>
 #include <cmath>
 #include <type_traits>
 #include <unordered_map>
+
+#include "../Collision/CollisionUtility.h"
+#include "../Core/HandleUtility.h"
+#include "LGF/Collision/Collision3D.h"
+#include "LGF/Math/Functions/VectorMath.h"
+#include "LGF/Math/MathConstants.h"
 
 namespace {
 
@@ -101,40 +101,44 @@ namespace {
 			return current;
 		}
 
-		if (const auto* end = std::get_if<Collision::Sphere>(&current)) {
-			const auto& start = std::get<Collision::Sphere>(previous);
+		if (const auto* currentSphere = std::get_if<Collision::Sphere>(&current)) {
+			const auto& previousSphere = std::get<Collision::Sphere>(previous);
 			return StaticColliderShape{ Collision::Sphere{
-				.center = Lerp(start.center, end->center, t),
-				.radius = std::lerp(start.radius, end->radius, t),
+				.center = Lerp(previousSphere.center, currentSphere->center, t),
+				.radius = std::lerp(previousSphere.radius, currentSphere->radius, t),
 			} };
 		}
-		if (const auto* end = std::get_if<Collision::SphericalCap>(&current)) {
-			const auto& start = std::get<Collision::SphericalCap>(previous);
-			Collision::SphericalCap result{
-				.apex = Lerp(start.apex, end->apex, t),
-				.axis = Lerp(start.axis, end->axis, t),
-				.baseRadius = std::lerp(start.baseRadius, end->baseRadius, t),
-				.height = std::lerp(start.height, end->height, t),
+		if (const auto* currentCap = std::get_if<Collision::SphericalCap>(&current)) {
+			const auto& previousCap = std::get<Collision::SphericalCap>(previous);
+			Collision::SphericalCap interpolatedCap{
+				.apex = Lerp(previousCap.apex, currentCap->apex, t),
+				.axis = Lerp(previousCap.axis, currentCap->axis, t),
+				.baseRadius = std::lerp(previousCap.baseRadius, currentCap->baseRadius, t),
+				.height = std::lerp(previousCap.height, currentCap->height, t),
 			};
-			return Collision::IsValid(result) ? StaticColliderShape{ result } : current;
+			return Collision::IsValid(interpolatedCap)
+				? StaticColliderShape{ interpolatedCap }
+				: current;
 		}
-		if (const auto* end = std::get_if<Collision::SphericalShellCap>(&current)) {
-			const auto& start = std::get<Collision::SphericalShellCap>(previous);
-			Collision::SphericalShellCap result{
-				.outerApex = Lerp(start.outerApex, end->outerApex, t),
-				.axis = Lerp(start.axis, end->axis, t),
-				.outerRadius = std::lerp(start.outerRadius, end->outerRadius, t),
-				.innerRadius = std::lerp(start.innerRadius, end->innerRadius, t),
-				.height = std::lerp(start.height, end->height, t),
+		if (const auto* currentShell = std::get_if<Collision::SphericalShellCap>(&current)) {
+			const auto& previousShell = std::get<Collision::SphericalShellCap>(previous);
+			Collision::SphericalShellCap interpolatedShell{
+				.outerApex = Lerp(previousShell.outerApex, currentShell->outerApex, t),
+				.axis = Lerp(previousShell.axis, currentShell->axis, t),
+				.outerRadius = std::lerp(previousShell.outerRadius, currentShell->outerRadius, t),
+				.innerRadius = std::lerp(previousShell.innerRadius, currentShell->innerRadius, t),
+				.height = std::lerp(previousShell.height, currentShell->height, t),
 			};
-			return Collision::IsValid(result) ? StaticColliderShape{ result } : current;
+			return Collision::IsValid(interpolatedShell)
+				? StaticColliderShape{ interpolatedShell }
+				: current;
 		}
 
-		const auto& start = std::get<Collision::AABB>(previous);
-		const auto& end = std::get<Collision::AABB>(current);
+		const auto& previousBox = std::get<Collision::AABB>(previous);
+		const auto& currentBox = std::get<Collision::AABB>(current);
 		return StaticColliderShape{ Collision::AABB{
-			.min = Lerp(start.min, end.min, t),
-			.max = Lerp(start.max, end.max, t),
+			.min = Lerp(previousBox.min, currentBox.min, t),
+			.max = Lerp(previousBox.max, currentBox.max, t),
 		} };
 	}
 
@@ -176,12 +180,12 @@ namespace {
 
 	struct GridCellHash {
 		std::size_t operator()(const GridCell& cell) const {
-			std::size_t result = std::hash<int32_t>{}(cell.x);
-			result ^= std::hash<int32_t>{}(cell.y) +
-				0x9e3779b9u + (result << 6u) + (result >> 2u);
-			result ^= std::hash<int32_t>{}(cell.z) +
-				0x9e3779b9u + (result << 6u) + (result >> 2u);
-			return result;
+			std::size_t hash = std::hash<int32_t>{}(cell.x);
+			hash ^= std::hash<int32_t>{}(cell.y) +
+				0x9e3779b9u + (hash << 6u) + (hash >> 2u);
+			hash ^= std::hash<int32_t>{}(cell.z) +
+				0x9e3779b9u + (hash << 6u) + (hash >> 2u);
+			return hash;
 		}
 	};
 
@@ -195,7 +199,7 @@ namespace {
 
 	struct StaticContact {
 		Vector3 normal{};
-		float penetrationDepth = 0.0f;
+		float penetrationDepth{};
 	};
 
 	std::optional<StaticContact> FindContact(
@@ -267,8 +271,8 @@ namespace {
 	std::optional<StaticContact> FindContact(
 		const Collision::Sphere& particle,
 		const Collision::AABB& collider) {
-		const Vector3 closest = Collision::ClosestPoint(particle.center, collider);
-		const Vector3 offset = particle.center - closest;
+		const Vector3 closestPoint = Collision::ClosestPoint(particle.center, collider);
+		const Vector3 offset = particle.center - closestPoint;
 		const float distanceSq = Math::LengthSq(offset);
 		if (distanceSq > particle.radius * particle.radius) {
 			return std::nullopt;
@@ -302,11 +306,12 @@ namespace {
 			Vector3{ 0.0f, 0.0f, -1.0f },
 			Vector3{ 0.0f, 0.0f, 1.0f },
 		};
-		const auto nearest = std::min_element(distances.begin(), distances.end());
-		const std::size_t index = static_cast<std::size_t>(nearest - distances.begin());
+		const auto nearestDistance = std::min_element(distances.begin(), distances.end());
+		const std::size_t normalIndex = static_cast<std::size_t>(
+			nearestDistance - distances.begin());
 		return StaticContact{
-			.normal = normals[index],
-			.penetrationDepth = particle.radius + *nearest,
+			.normal = normals[normalIndex],
+			.penetrationDepth = particle.radius + *nearestDistance,
 		};
 	}
 
@@ -352,8 +357,8 @@ namespace LGF::Physics {
 			.collisionParameter = NormalizeCollisionParameter(desc.collisionParameter),
 			.userData = desc.userData,
 			.generation = generation,
-			.enabled = desc.enabled,
-			.occupied = true,
+			.isEnabled = desc.enabled,
+			.isOccupied = true,
 		};
 		++particleCount_;
 		return { index, generation };
@@ -372,10 +377,10 @@ namespace LGF::Physics {
 		freeParticleIndices_.reserve(particles_.size());
 		for (uint32_t index = 0u; index < particles_.size(); ++index) {
 			ParticleSlot& particle = particles_[index];
-			if (particle.occupied) {
+			if (particle.isOccupied) {
 				particle.generation = Internal::NextGeneration(particle.generation);
 			}
-			particle.occupied = false;
+			particle.isOccupied = false;
 			freeParticleIndices_.push_back(index);
 		}
 		particleCount_ = 0u;
@@ -451,7 +456,7 @@ namespace LGF::Physics {
 		if (!particle) {
 			return false;
 		}
-		particle->enabled = enabled;
+		particle->isEnabled = enabled;
 		return true;
 	}
 
@@ -494,7 +499,7 @@ namespace LGF::Physics {
 			.radius = particle->radius,
 			.mass = particle->inverseMass > 0.0f ? 1.0f / particle->inverseMass : 0.0f,
 			.collisionParameter = particle->collisionParameter,
-			.enabled = particle->enabled,
+			.enabled = particle->isEnabled,
 			.userData = particle->userData,
 		};
 	}
@@ -504,7 +509,7 @@ namespace LGF::Physics {
 		states.reserve(particleCount_);
 		for (uint32_t index = 0u; index < particles_.size(); ++index) {
 			const ParticleSlot& particle = particles_[index];
-			if (!particle.occupied) {
+			if (!particle.isOccupied) {
 				continue;
 			}
 			states.push_back(ParticleState{
@@ -514,7 +519,7 @@ namespace LGF::Physics {
 				.radius = particle.radius,
 				.mass = particle.inverseMass > 0.0f ? 1.0f / particle.inverseMass : 0.0f,
 				.collisionParameter = particle.collisionParameter,
-				.enabled = particle.enabled,
+				.enabled = particle.isEnabled,
 				.userData = particle.userData,
 			});
 		}
@@ -543,7 +548,7 @@ namespace LGF::Physics {
 			.previousShape = shape,
 			.options = options,
 			.generation = generation,
-			.occupied = true,
+			.isOccupied = true,
 		};
 		collider.options.collisionParameter =
 			NormalizeCollisionParameter(options.collisionParameter);
@@ -580,7 +585,7 @@ namespace LGF::Physics {
 		if (!collider) {
 			return false;
 		}
-		collider->occupied = false;
+		collider->isOccupied = false;
 		collider->generation = Internal::NextGeneration(collider->generation);
 		freeColliderIndices_.push_back(handle.index);
 		--colliderCount_;
@@ -592,10 +597,10 @@ namespace LGF::Physics {
 		freeColliderIndices_.reserve(colliders_.size());
 		for (uint32_t index = 0u; index < colliders_.size(); ++index) {
 			ColliderSlot& collider = colliders_[index];
-			if (collider.occupied) {
+			if (collider.isOccupied) {
 				collider.generation = Internal::NextGeneration(collider.generation);
 			}
-			collider.occupied = false;
+			collider.isOccupied = false;
 			freeColliderIndices_.push_back(index);
 		}
 		colliderCount_ = 0u;
@@ -666,7 +671,7 @@ namespace LGF::Physics {
 
 	void ParticleWorld::UpdateColliderHistory() {
 		for (ColliderSlot& collider : colliders_) {
-			if (collider.occupied) {
+			if (collider.isOccupied) {
 				collider.previousShape = collider.shape;
 			}
 		}
@@ -674,7 +679,7 @@ namespace LGF::Physics {
 
 	void ParticleWorld::IntegrateParticles(float substepTime) {
 		for (ParticleSlot& particle : particles_) {
-			if (!particle.occupied || !particle.enabled) {
+			if (!particle.isOccupied || !particle.isEnabled) {
 				continue;
 			}
 
@@ -695,7 +700,7 @@ namespace LGF::Physics {
 		std::vector<ParticlePair> pairs;
 		float maximumRadius = 0.0f;
 		for (const ParticleSlot& particle : particles_) {
-			if (particle.occupied && particle.enabled) {
+			if (particle.isOccupied && particle.isEnabled) {
 				maximumRadius = std::max(maximumRadius, particle.radius);
 			}
 		}
@@ -710,14 +715,14 @@ namespace LGF::Physics {
 		grid.reserve(particleCount_);
 		for (uint32_t index = 0u; index < particles_.size(); ++index) {
 			const ParticleSlot& particle = particles_[index];
-			if (particle.occupied && particle.enabled) {
+			if (particle.isOccupied && particle.isEnabled) {
 				grid[ToGridCell(particle.position, cellSize)].push_back(index);
 			}
 		}
 
 		for (uint32_t firstIndex = 0u; firstIndex < particles_.size(); ++firstIndex) {
 			const ParticleSlot& first = particles_[firstIndex];
-			if (!first.occupied || !first.enabled) {
+			if (!first.isOccupied || !first.isEnabled) {
 				continue;
 			}
 
@@ -769,7 +774,7 @@ namespace LGF::Physics {
 				contact.friction,
 				std::sqrt(particleParameter.friction * colliderParameter.friction));
 			++contact.contactCount;
-			contact.collided = true;
+			contact.hasCollision = true;
 		};
 
 		for (uint32_t iteration = 0u;
@@ -819,7 +824,7 @@ namespace LGF::Physics {
 				particleIndex < particles_.size();
 				++particleIndex) {
 				ParticleSlot& particle = particles_[particleIndex];
-				if (!particle.occupied || !particle.enabled || particle.inverseMass <= 0.0f) {
+				if (!particle.isOccupied || !particle.isEnabled || particle.inverseMass <= 0.0f) {
 					continue;
 				}
 
@@ -827,7 +832,7 @@ namespace LGF::Physics {
 					colliderIndex < colliders_.size();
 					++colliderIndex) {
 					const ColliderSlot& collider = colliders_[colliderIndex];
-					if (!collider.occupied || !collider.options.enabled) {
+					if (!collider.isOccupied || !collider.options.enabled) {
 						continue;
 					}
 
@@ -871,7 +876,7 @@ namespace LGF::Physics {
 		float damping) {
 		for (uint32_t index = 0u; index < particles_.size(); ++index) {
 			ParticleSlot& particle = particles_[index];
-			if (!particle.occupied || !particle.enabled) {
+			if (!particle.isOccupied || !particle.isEnabled) {
 				continue;
 			}
 			if (particle.inverseMass <= 0.0f) {
@@ -886,7 +891,7 @@ namespace LGF::Physics {
 			particle.velocity *= damping;
 
 			const ContactAccumulator& contact = contacts[index];
-			if (!contact.collided) {
+			if (!contact.hasCollision) {
 				continue;
 			}
 
@@ -969,7 +974,7 @@ namespace LGF::Physics {
 	void ParticleWorld::CleanupParticles() {
 		for (uint32_t index = 0u; index < particles_.size(); ++index) {
 			ParticleSlot& particle = particles_[index];
-			if (!particle.occupied) {
+			if (!particle.isOccupied) {
 				continue;
 			}
 
@@ -1088,7 +1093,7 @@ namespace LGF::Physics {
 			return nullptr;
 		}
 		ParticleSlot& particle = particles_[handle.index];
-		return particle.occupied && particle.generation == handle.generation
+		return particle.isOccupied && particle.generation == handle.generation
 			? &particle
 			: nullptr;
 	}
@@ -1099,7 +1104,7 @@ namespace LGF::Physics {
 			return nullptr;
 		}
 		const ParticleSlot& particle = particles_[handle.index];
-		return particle.occupied && particle.generation == handle.generation
+		return particle.isOccupied && particle.generation == handle.generation
 			? &particle
 			: nullptr;
 	}
@@ -1110,7 +1115,7 @@ namespace LGF::Physics {
 			return nullptr;
 		}
 		ColliderSlot& collider = colliders_[handle.index];
-		return collider.occupied && collider.generation == handle.generation
+		return collider.isOccupied && collider.generation == handle.generation
 			? &collider
 			: nullptr;
 	}
@@ -1121,17 +1126,17 @@ namespace LGF::Physics {
 			return nullptr;
 		}
 		const ColliderSlot& collider = colliders_[handle.index];
-		return collider.occupied && collider.generation == handle.generation
+		return collider.isOccupied && collider.generation == handle.generation
 			? &collider
 			: nullptr;
 	}
 
 	void ParticleWorld::RemoveParticleAt(uint32_t index) {
 		ParticleSlot& particle = particles_[index];
-		if (!particle.occupied) {
+		if (!particle.isOccupied) {
 			return;
 		}
-		particle.occupied = false;
+		particle.isOccupied = false;
 		particle.generation = Internal::NextGeneration(particle.generation);
 		freeParticleIndices_.push_back(index);
 		--particleCount_;

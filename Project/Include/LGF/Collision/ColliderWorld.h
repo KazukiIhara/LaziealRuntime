@@ -19,46 +19,52 @@ namespace LGF::Collision {
 
 	using ColliderShape = std::variant<Sphere, AABB, Capsule>;
 
+	/// <summary>登録されたコライダーを識別するハンドル</summary>
 	struct ColliderHandle {
 		static constexpr uint32_t InvalidIndex = std::numeric_limits<uint32_t>::max();
 
 		uint32_t index = InvalidIndex;
-		uint32_t generation = 0u;
+		uint32_t generation{};
 
 		bool IsValid() const;
 		bool operator==(const ColliderHandle&) const = default;
 	};
 
+	/// <summary>コライダーの登録パラメータ</summary>
 	struct ColliderOptions {
 		CollisionLayerMask layer = 1u;
 		CollisionLayerMask mask = AllLayers;
 		bool isTrigger = false;
 		bool enabled = true;
-		uint64_t userData = 0u;
+		uint64_t userData{};
 	};
 
+	/// <summary>衝突イベントの発生フェーズ</summary>
 	enum class CollisionPhase : uint8_t {
 		Enter,
 		Stay,
 		Exit,
 	};
 
+	/// <summary>コライダー間で発生した衝突イベント</summary>
 	struct CollisionEvent {
 		ColliderHandle first{};
 		ColliderHandle second{};
-		uint64_t firstUserData = 0u;
-		uint64_t secondUserData = 0u;
+		uint64_t firstUserData{};
+		uint64_t secondUserData{};
 		CollisionPhase phase = CollisionPhase::Enter;
 		Contact contact{};
-		bool isTrigger = false;
+		bool isTrigger{};
 	};
 
+	/// <summary>ワールド内のコライダーに対するレイキャスト結果</summary>
 	struct WorldRaycastHit {
 		ColliderHandle collider{};
-		uint64_t userData = 0u;
+		uint64_t userData{};
 		RaycastHit hit{};
 	};
 
+	/// <summary>コライダーの登録、衝突イベント、レイキャストを管理する</summary>
 	class ColliderWorld {
 	public:
 		ColliderHandle Add(
@@ -107,7 +113,7 @@ namespace LGF::Collision {
 			ColliderShape shape{};
 			ColliderOptions options{};
 			uint32_t generation = 1u;
-			bool occupied = false;
+			bool isOccupied{};
 		};
 
 		struct PairKey {
@@ -119,9 +125,9 @@ namespace LGF::Collision {
 
 		struct PairState {
 			Contact contact{};
-			uint64_t firstUserData = 0u;
-			uint64_t secondUserData = 0u;
-			bool isTrigger = false;
+			uint64_t firstUserData{};
+			uint64_t secondUserData{};
+			bool isTrigger{};
 		};
 
 		Slot* FindSlot(ColliderHandle handle);
@@ -131,7 +137,7 @@ namespace LGF::Collision {
 		std::vector<uint32_t> freeIndices_;
 		std::map<PairKey, PairState> activePairs_;
 		std::vector<CollisionEvent> events_;
-		std::size_t colliderCount_ = 0u;
+		std::size_t colliderCount_{};
 	};
 
 }

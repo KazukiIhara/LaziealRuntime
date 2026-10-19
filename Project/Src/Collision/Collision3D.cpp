@@ -1,8 +1,5 @@
 #include "LGF/Collision/Collision3D.h"
 
-#include "LGF/Math/Functions/VectorMath.h"
-#include "LGF/Math/MathConstants.h"
-
 #include <algorithm>
 #include <array>
 #include <cstddef>
@@ -10,20 +7,16 @@
 #include <iterator>
 #include <limits>
 
+#include "CollisionUtility.h"
+#include "LGF/Math/Functions/VectorMath.h"
+#include "LGF/Math/MathConstants.h"
+
 namespace {
 
 	using namespace LGF;
 
 	Vector3 Reverse(const Vector3& value) {
 		return { -value.x, -value.y, -value.z };
-	}
-
-	Vector3 SafeNormal(const Vector3& value, const Vector3& fallback) {
-		const float lengthSq = Math::LengthSq(value);
-		if (lengthSq <= Math::EPSILON * Math::EPSILON) {
-			return fallback;
-		}
-		return value / std::sqrt(lengthSq);
 	}
 
 	LGF::Collision::Contact ReverseContact(const LGF::Collision::Contact& contact) {
@@ -37,9 +30,9 @@ namespace {
 	struct SphericalShellCapGeometry {
 		Vector3 axis{};
 		Vector3 sphereCenter{};
-		float openingPlaneOffset = 0.0f;
-		float outerOpeningRadius = 0.0f;
-		float innerOpeningRadius = 0.0f;
+		float openingPlaneOffset{};
+		float outerOpeningRadius{};
+		float innerOpeningRadius{};
 	};
 
 	SphericalShellCapGeometry MakeGeometry(
@@ -75,7 +68,8 @@ namespace {
 		float radius) {
 		const Vector3 offset = point - circleCenter;
 		const Vector3 radial = offset - axis * Math::Dot(offset, axis);
-		return circleCenter + SafeNormal(radial, PerpendicularTo(axis)) * radius;
+		return circleCenter +
+			Collision::Internal::SafeNormal(radial, PerpendicularTo(axis)) * radius;
 	}
 
 	Vector3 ClosestPointOnSphericalCapSurface(
@@ -83,7 +77,7 @@ namespace {
 		const SphericalShellCapGeometry& geometry,
 		float radius,
 		float openingRadius) {
-		const Vector3 direction = SafeNormal(
+		const Vector3 direction = Collision::Internal::SafeNormal(
 			point - geometry.sphereCenter,
 			-geometry.axis);
 		const Vector3 spherePoint = geometry.sphereCenter + direction * radius;
@@ -105,7 +99,9 @@ namespace {
 		const Vector3 offset = point - ringCenter;
 		const Vector3 radial = offset - geometry.axis * Math::Dot(offset, geometry.axis);
 		const float radialLength = Math::Length(radial);
-		const Vector3 radialDirection = SafeNormal(radial, PerpendicularTo(geometry.axis));
+		const Vector3 radialDirection = Collision::Internal::SafeNormal(
+			radial,
+			PerpendicularTo(geometry.axis));
 		const float radius = std::clamp(
 			radialLength,
 			geometry.innerOpeningRadius,
@@ -438,7 +434,9 @@ namespace LGF::Collision {
 		}
 
 		const float distance = std::sqrt(distanceSq);
-		const Vector3 normal = SafeNormal(delta, { 1.0f, 0.0f, 0.0f });
+		const Vector3 normal = Collision::Internal::SafeNormal(
+			delta,
+			{ 1.0f, 0.0f, 0.0f });
 		const float penetrationDepth = radiusSum - distance;
 		return Contact{
 			.point = first.center + normal * (first.radius - penetrationDepth * 0.5f),
@@ -462,7 +460,9 @@ namespace LGF::Collision {
 		const Vector3 sphereCenter = sphericalCap.apex + axis * sphereRadius;
 		const Vector3 centerOffset = sphere.center - sphereCenter;
 		const float centerDistance = Math::Length(centerOffset);
-		const Vector3 surfaceDirection = SafeNormal(centerOffset, Reverse(axis));
+		const Vector3 surfaceDirection = Collision::Internal::SafeNormal(
+			centerOffset,
+			Reverse(axis));
 		const Vector3 surfacePoint = sphereCenter + surfaceDirection * sphereRadius;
 		const float surfaceHeight = Math::Dot(
 			surfacePoint - sphericalCap.apex,
@@ -481,7 +481,9 @@ namespace LGF::Collision {
 
 		return Contact{
 			.point = surfacePoint,
-			.normal = SafeNormal(surfacePoint - sphere.center, Reverse(surfaceDirection)),
+			.normal = Collision::Internal::SafeNormal(
+				surfacePoint - sphere.center,
+				Reverse(surfaceDirection)),
 			.penetrationDepth = sphere.radius - distanceToSurface,
 		};
 	}
@@ -516,7 +518,7 @@ namespace LGF::Collision {
 			: -Math::Normalize(sphericalShellCap.axis);
 		return Contact{
 			.point = closest,
-			.normal = SafeNormal(offset, fallback),
+			.normal = Collision::Internal::SafeNormal(offset, fallback),
 			.penetrationDepth = centerInside
 				? sphere.radius + distance
 				: sphere.radius - distance,
@@ -636,7 +638,9 @@ namespace LGF::Collision {
 		}
 
 		const float distance = std::sqrt(distanceSq);
-		const Vector3 normal = SafeNormal(delta, { 1.0f, 0.0f, 0.0f });
+		const Vector3 normal = Collision::Internal::SafeNormal(
+			delta,
+			{ 1.0f, 0.0f, 0.0f });
 		const float penetrationDepth = radiusSum - distance;
 		return Contact{
 			.point = closest + normal * (capsule.radius - penetrationDepth * 0.5f),
@@ -720,7 +724,9 @@ namespace LGF::Collision {
 		}
 
 		const float distance = std::sqrt(distanceSq);
-		const Vector3 normal = SafeNormal(delta, { 1.0f, 0.0f, 0.0f });
+		const Vector3 normal = Collision::Internal::SafeNormal(
+			delta,
+			{ 1.0f, 0.0f, 0.0f });
 		const float penetrationDepth = radiusSum - distance;
 		return Contact{
 			.point = closest.first + normal *
@@ -795,7 +801,7 @@ namespace LGF::Collision {
 		if (Math::LengthSq(offset) <= sphere.radius * sphere.radius) {
 			return RaycastHit{
 				.point = ray.origin,
-				.normal = SafeNormal(offset, Reverse(direction)),
+				.normal = Collision::Internal::SafeNormal(offset, Reverse(direction)),
 				.distance = 0.0f,
 			};
 		}
@@ -815,7 +821,9 @@ namespace LGF::Collision {
 		const Vector3 point = ray.origin + direction * distance;
 		return RaycastHit{
 			.point = point,
-			.normal = SafeNormal(point - sphere.center, Reverse(direction)),
+			.normal = Collision::Internal::SafeNormal(
+				point - sphere.center,
+				Reverse(direction)),
 			.distance = distance,
 		};
 	}
@@ -922,7 +930,9 @@ namespace LGF::Collision {
 			const Vector3 closest = ClosestPoint(ray.origin, capsule);
 			return RaycastHit{
 				.point = ray.origin,
-				.normal = SafeNormal(ray.origin - closest, Reverse(direction)),
+				.normal = Collision::Internal::SafeNormal(
+					ray.origin - closest,
+					Reverse(direction)),
 				.distance = 0.0f,
 			};
 		}
@@ -954,7 +964,9 @@ namespace LGF::Collision {
 					capsule.start + axis * (axisPosition / axisLengthSq);
 				nearestHit = RaycastHit{
 					.point = point,
-					.normal = SafeNormal(point - axisPoint, Reverse(direction)),
+					.normal = Collision::Internal::SafeNormal(
+						point - axisPoint,
+						Reverse(direction)),
 					.distance = distance,
 				};
 			}

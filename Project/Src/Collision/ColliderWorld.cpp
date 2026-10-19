@@ -1,9 +1,9 @@
 #include "LGF/Collision/ColliderWorld.h"
 
-#include "../Core/HandleUtility.h"
-
 #include <algorithm>
 #include <utility>
+
+#include "../Core/HandleUtility.h"
 
 namespace {
 
@@ -54,7 +54,7 @@ namespace LGF::Collision {
 		Slot& slot = slots_[index];
 		slot.shape = shape;
 		slot.options = options;
-		slot.occupied = true;
+		slot.isOccupied = true;
 		++colliderCount_;
 		return { index, slot.generation };
 	}
@@ -83,7 +83,7 @@ namespace LGF::Collision {
 			return false;
 		}
 
-		slot->occupied = false;
+		slot->isOccupied = false;
 		slot->generation = Internal::NextGeneration(slot->generation);
 		freeIndices_.push_back(handle.index);
 		--colliderCount_;
@@ -95,10 +95,10 @@ namespace LGF::Collision {
 		freeIndices_.reserve(slots_.size());
 		for (uint32_t index = 0u; index < slots_.size(); ++index) {
 			Slot& slot = slots_[index];
-			if (slot.occupied) {
+			if (slot.isOccupied) {
 			slot.generation = Internal::NextGeneration(slot.generation);
 			}
-			slot.occupied = false;
+			slot.isOccupied = false;
 			freeIndices_.push_back(index);
 		}
 		activePairs_.clear();
@@ -205,14 +205,14 @@ namespace LGF::Collision {
 
 		for (uint32_t firstIndex = 0u; firstIndex < slots_.size(); ++firstIndex) {
 			const Slot& firstSlot = slots_[firstIndex];
-			if (!firstSlot.occupied || !firstSlot.options.enabled) {
+			if (!firstSlot.isOccupied || !firstSlot.options.enabled) {
 				continue;
 			}
 
 			for (uint32_t secondIndex = firstIndex + 1u;
 				secondIndex < slots_.size(); ++secondIndex) {
 				const Slot& secondSlot = slots_[secondIndex];
-				if (!secondSlot.occupied || !secondSlot.options.enabled) {
+				if (!secondSlot.isOccupied || !secondSlot.options.enabled) {
 					continue;
 				}
 				if ((firstSlot.options.mask & secondSlot.options.layer) == 0u ||
@@ -282,7 +282,7 @@ namespace LGF::Collision {
 		float closestDistance = maxDistance;
 		for (uint32_t index = 0u; index < slots_.size(); ++index) {
 			const Slot& slot = slots_[index];
-			if (!slot.occupied || !slot.options.enabled ||
+			if (!slot.isOccupied || !slot.options.enabled ||
 				(slot.options.layer & mask) == 0u) {
 				continue;
 			}
@@ -321,7 +321,7 @@ namespace LGF::Collision {
 			return nullptr;
 		}
 		Slot& slot = slots_[handle.index];
-		return slot.occupied && slot.generation == handle.generation ? &slot : nullptr;
+		return slot.isOccupied && slot.generation == handle.generation ? &slot : nullptr;
 	}
 
 	const ColliderWorld::Slot* ColliderWorld::FindSlot(ColliderHandle handle) const {
@@ -329,7 +329,7 @@ namespace LGF::Collision {
 			return nullptr;
 		}
 		const Slot& slot = slots_[handle.index];
-		return slot.occupied && slot.generation == handle.generation ? &slot : nullptr;
+		return slot.isOccupied && slot.generation == handle.generation ? &slot : nullptr;
 	}
 
 }

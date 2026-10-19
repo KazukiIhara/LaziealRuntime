@@ -14,13 +14,14 @@ namespace LGF::Collision {
 	struct Contact {
 		Vector3 point{};
 		Vector3 normal{};
-		float penetrationDepth = 0.0f;
+		float penetrationDepth{};
 	};
 
+	/// <summary>レイと形状が交差した位置、法線、レイ始点からの距離</summary>
 	struct RaycastHit {
 		Vector3 point{};
 		Vector3 normal{};
-		float distance = 0.0f;
+		float distance{};
 	};
 
 	bool IsValid(const Sphere& sphere);
