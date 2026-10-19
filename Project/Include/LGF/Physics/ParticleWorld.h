@@ -165,6 +165,20 @@ namespace LGF::Physics {
 		void Step(float deltaTime);
 
 	private:
+		struct ParticlePair {
+			uint32_t firstIndex = 0u;
+			uint32_t secondIndex = 0u;
+		};
+
+		struct ContactAccumulator {
+			Vector3 normal{};
+			Vector3 surfaceVelocity{};
+			float restitution = 0.0f;
+			float friction = 0.0f;
+			uint32_t contactCount = 0u;
+			bool collided = false;
+		};
+
 		struct ParticleSlot {
 			Vector3 position{};
 			Vector3 previousPosition{};
@@ -191,6 +205,23 @@ namespace LGF::Physics {
 		const ParticleSlot* FindParticle(ParticleHandle handle) const;
 		ColliderSlot* FindCollider(StaticColliderHandle handle);
 		const ColliderSlot* FindCollider(StaticColliderHandle handle) const;
+		void UpdateColliderHistory();
+		void IntegrateParticles(float substepTime);
+		std::vector<ParticlePair> BuildParticlePairs() const;
+		void SolvePositions(
+			const std::vector<ParticlePair>& particlePairs,
+			const std::vector<StaticColliderShape>& colliderShapes,
+			const std::vector<Vector3>& colliderVelocities,
+			float maximumCorrectionPerIteration,
+			std::vector<ContactAccumulator>& contacts,
+			std::vector<Vector3>& positionCorrections);
+		void SolveVelocities(
+			const std::vector<ParticlePair>& particlePairs,
+			const std::vector<ContactAccumulator>& contacts,
+			const std::vector<Vector3>& positionCorrections,
+			float substepTime,
+			float damping);
+		void CleanupParticles();
 		void RemoveParticleAt(uint32_t index);
 
 		ParticleWorldSettings settings_{};

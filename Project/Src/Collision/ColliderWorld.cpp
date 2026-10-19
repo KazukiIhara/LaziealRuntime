@@ -1,5 +1,7 @@
 #include "LGF/Collision/ColliderWorld.h"
 
+#include "../Core/HandleUtility.h"
+
 #include <algorithm>
 #include <utility>
 
@@ -27,11 +29,6 @@ namespace {
 				return Raycast(ray, colliderShape, maxDistance);
 			},
 			shape);
-	}
-
-	uint32_t NextGeneration(uint32_t generation) {
-		++generation;
-		return generation == 0u ? 1u : generation;
 	}
 
 }
@@ -87,7 +84,7 @@ namespace LGF::Collision {
 		}
 
 		slot->occupied = false;
-		slot->generation = NextGeneration(slot->generation);
+		slot->generation = Internal::NextGeneration(slot->generation);
 		freeIndices_.push_back(handle.index);
 		--colliderCount_;
 		return true;
@@ -99,7 +96,7 @@ namespace LGF::Collision {
 		for (uint32_t index = 0u; index < slots_.size(); ++index) {
 			Slot& slot = slots_[index];
 			if (slot.occupied) {
-				slot.generation = NextGeneration(slot.generation);
+			slot.generation = Internal::NextGeneration(slot.generation);
 			}
 			slot.occupied = false;
 			freeIndices_.push_back(index);
