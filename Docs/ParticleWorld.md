@@ -92,6 +92,10 @@ ParticleWorldへ渡された値は`0`から`1`の範囲に収められます。
 | `substepCount` | 1フレームを分割して計算する回数 |
 | `solverIterationCount` | 1サブステップ中に位置補正を繰り返す回数 |
 | `linearDamping` | 速度の減衰量 |
+| `penetrationSlop` | 補正せずに許容する小さなめり込み量 |
+| `positionCorrectionRate` | 1反復で解消するめり込みの割合 |
+| `maximumDepenetrationVelocity` | めり込み解消で許可する最大押し出し速度 |
+| `bounceVelocityThreshold` | 反発係数を適用する最低衝突速度 |
 | `maximumDeltaTime` | 1フレームで受け付ける最大経過時間 |
 
 `substepCount`と`solverIterationCount`は似ていますが、役割が異なります。
@@ -103,7 +107,32 @@ ParticleWorldへ渡された値は`0`から`1`の範囲に収められます。
 多数の粒子が積み重なったときの押し合いを安定させたい場合は、主に`solverIterationCount`を増やします。
 どちらも増やすほど処理負荷が上がります。
 
-### 3.4 StaticCollider
+### 3.4 ParticleWorldStepStatistics
+
+`GetLastStepStatistics()`から、直前に実行した`Step()`の処理時間と衝突候補数を取得できます。
+
+| メンバー | 意味 |
+|---|---|
+| `totalMilliseconds` | `Step()`全体の処理時間 |
+| `integrationMilliseconds` | 重力と外力から速度、予測位置を更新した時間 |
+| `broadPhaseMilliseconds` | 空間ハッシュを構築して候補ペアを作成した時間 |
+| `positionSolveMilliseconds` | 粒子同士と静的コライダーのめり込みを解消した時間 |
+| `velocitySolveMilliseconds` | 速度の復元、反発、摩擦を計算した時間 |
+| `cleanupMilliseconds` | 外力の消去、範囲外粒子の削除、コライダー形状の保存に使った時間 |
+| `candidatePairCount` | 全サブステップで生成した粒子ペア候補数の合計 |
+
+```cpp
+world.Step(deltaTime);
+
+const auto& statistics = world.GetLastStepStatistics();
+std::cout << statistics.totalMilliseconds << " ms\n";
+std::cout << statistics.candidatePairCount << " pairs\n";
+```
+
+各区間は個別に計測しているため、それらの合計と`totalMilliseconds`は完全には一致しません。
+コライダーの補間、作業配列の準備、計測自体の負荷などが全体時間にだけ含まれます。
+
+### 3.5 StaticCollider
 
 ParticleWorldへ登録できる静的コライダーは、現在Sphere、SphericalCap、SphericalShellCap、AABBです。
 
@@ -202,8 +231,8 @@ flowchart TD
     E --> F[粒子と静的Colliderのめり込みを位置補正]
     F --> G{反復回数に達したか}
     G -- いいえ --> D
-    G -- はい --> H[補正後の位置から速度を再計算]
-    H --> I[静的Colliderへの反発と摩擦を適用]
+    G -- はい --> H[位置補正を除いた移動量から速度を再計算]
+    H --> I[表面との相対速度へ反発と摩擦を適用]
     I --> J[粒子同士へ衝突Impulseを適用]
     J --> K{サブステップ数に達したか}
     K -- いいえ --> C
@@ -316,15 +345,28 @@ penetration = minimumDistance - distance
 normal = normalize(delta)
 ```
 
-めり込み量を逆質量の比率で分配します。
+小さなめり込みを許容し、1反復で直す量と最大押し出し量を計算します。
 
 ```text
+effectivePenetration = max(penetration - penetrationSlop, 0)
+maximumCorrectionPerIteration =
+    maximumDepenetrationVelocity
+    × substepTime
+    / solverIterationCount
+correctionDepth = min(
+    effectivePenetration × positionCorrectionRate,
+    maximumCorrectionPerIteration)
+
 inverseMassSum = inverseMass1 + inverseMass2
-correction = normal × penetration / inverseMassSum
+correction = normal × correctionDepth / inverseMassSum
 
 x1 -= correction × inverseMass1
 x2 += correction × inverseMass2
 ```
+
+`penetrationSlop`以下の重なりを無理に解消しないことで、接触面付近の細かい振動を抑えます。
+`positionCorrectionRate`は、1反復で解消する割合です。全量を一度に直さず、反復しながら徐々に収束させます。
+`maximumDepenetrationVelocity`は深いめり込みを一気に直すことを防ぐ上限で、サブステップ時間と反復回数から1反復あたりの最大補正距離へ変換します。
 
 軽い粒子は大きく移動し、重い粒子は小さく移動します。
 片方の質量が`0`なら逆質量も`0`なので、その粒子は移動せず、もう片方だけが補正されます。
@@ -334,10 +376,14 @@ x2 += correction × inverseMass2
 
 ## 10. 静的コライダーとの位置補正
 
-静的コライダーは動かないため、めり込み量のすべてを粒子側へ適用します。
+静的コライダーは粒子から押されないため、位置補正は粒子側だけへ適用します。
 
 ```text
-particlePosition += contactNormal × penetrationDepth
+effectivePenetration = max(penetrationDepth - penetrationSlop, 0)
+correctionDepth = min(
+    effectivePenetration × positionCorrectionRate,
+    maximumCorrectionPerIteration)
+particlePosition += contactNormal × correctionDepth
 ```
 
 ここで使う接触法線は、静的コライダーとの重なりを解消し、
@@ -416,12 +462,23 @@ outerRadius - innerRadius < height <= outerRadius
 
 ## 11. 補正後の速度
 
-位置補正によって粒子の位置を直接変更したため、元の速度と実際の移動量が一致しなくなります。
-そこで、サブステップ開始時に保存した位置から速度を作り直します。
+位置補正によって粒子を大きく動かし、その移動量をそのまま速度へ変換すると、深く埋まった粒子が異常な速度で吹き飛ぶ原因になります。
+例えば0.5mの補正を`1 / 480`秒のサブステップで速度へ変換すると、補正だけで240m/sになります。
+
+ParticleWorldでは、粒子同士と静的コライダーによって加えた位置補正を`positionCorrections`へ記録します。
+速度を作り直すときは、この補正量を実際の移動量から除外します。
 
 ```text
-velocity = (correctedPosition - previousPosition) / substepTime
+physicalMovement =
+    correctedPosition
+    - previousPosition
+    - positionCorrection
+
+velocity = physicalMovement / substepTime
 ```
+
+この方法は、めり込み解消用の位置移動と物理的な速度変化を分離する、Split Impulseに近い考え方です。
+位置は安全な場所へ戻しますが、その補正距離から新しい運動エネルギーを作りません。
 
 続いて、指数関数を使った線形減衰を適用します。
 
@@ -434,23 +491,43 @@ velocity *= damping
 
 ## 12. 静的コライダーへの反発と摩擦
 
-速度を接触法線方向と接線方向へ分解します。
+`SetColliderShape()`で静的コライダーを移動した場合は、前回と現在の基準位置から線形速度を求めます。
 
 ```text
-normalSpeed = dot(velocity, normal)
-normalVelocity = normal × normalSpeed
-tangentVelocity = velocity - normalVelocity
+surfaceVelocity =
+    (currentColliderPosition - previousColliderPosition)
+    / frameTime
 ```
 
-`normalSpeed < 0`の場合、粒子は表面へ向かっているため、反発と摩擦を適用します。
+Sphereでは`center`、SphericalCapでは`apex`、SphericalShellCapでは`outerApex`、AABBでは中心を基準位置として使います。
+粒子速度から表面速度を引き、コライダーから見た相対速度を作ります。
 
 ```text
-velocity = tangentVelocity × (1 - friction)
-         - normalVelocity × restitution
+relativeVelocity = particleVelocity - surfaceVelocity
+normalSpeed = dot(relativeVelocity, normal)
+normalVelocity = normal × normalSpeed
+tangentVelocity = relativeVelocity - normalVelocity
+```
+
+`normalSpeed < 0`の場合、粒子と表面が接近しています。
+衝突速度が`bounceVelocityThreshold`を超える場合だけ反発係数を使います。
+しきい値以下の低速接触では反発係数を`0`として、表面へ向かう速度だけを消します。
+
+```text
+appliedRestitution =
+    -normalSpeed > bounceVelocityThreshold
+    ? restitution
+    : 0
+
+particleVelocity = surfaceVelocity
+    + tangentVelocity × (1 - friction)
+    - normalVelocity × appliedRestitution
 ```
 
 - 法線方向の速度は向きを反転し、反発係数を掛けます。
 - 接線方向の速度は摩擦係数に応じて減らします。
+- 低速接触では跳ね返さず、静止直前の細かいバウンドを抑えます。
+- 最後に表面速度を戻すため、動く器が粒子を運ぶ速度は失われません。
 
 複数の静的コライダーへ同時に接触した場合は、接触法線を加算してから正規化します。
 角へ接触した場合は、複数面の中間方向へ押し返す法線になります。
@@ -466,6 +543,7 @@ normalSpeed = dot(relativeVelocity, normal)
 ```
 
 `normalSpeed`が負なら、2つの粒子は接近しています。
+静的コライダーと同じく、接近速度が`bounceVelocityThreshold`以下なら反発係数を`0`として、低速時の跳ね続けを防ぎます。
 法線方向へ加える力積の大きさは次の式です。
 
 ```text
@@ -560,6 +638,22 @@ struct ParticleHandle {
 
 反復回数を増やすと複数接触の位置補正が収束しやすくなります。
 
+### 深く埋まった粒子を早く戻したい
+
+`maximumDepenetrationVelocity`を大きくすると、1フレームで許可される位置補正量が増えます。
+ただし、大きくしすぎると重なった粒子が急に離れ、見た目が不安定になる可能性があります。
+
+`positionCorrectionRate`を大きくすると浅いめり込みの収束も速くなります。
+まず`0.2`前後から調整し、必要な場合だけ`maximumDepenetrationVelocity`を上げるのがおすすめです。
+
+接触面付近で震える場合は、`penetrationSlop`を少し大きくします。
+大きくしすぎると目に見える重なりを許すことになるため、粒子半径より十分小さい値にします。
+
+### 静止直前に細かく跳ね続ける
+
+`bounceVelocityThreshold`を大きくすると、低速衝突で反発係数が使われなくなります。
+高速な落下では跳ね、静止直前だけ跳ねなくするには、`0.5`から`1.0`程度を基準に調整します。
+
 ### 粒子がいつまでも動き続ける
 
 `linearDamping`か摩擦を大きくします。
@@ -578,10 +672,12 @@ struct ParticleHandle {
 
 粒子数を`N`、静的コライダー数を`M`、ソルバー反復回数を`I`とします。
 
+- 空間ハッシュと粒子同士の候補ペアは、各サブステップの予測位置から1回だけ作成します。
+- 作成した候補ペアは、すべての位置補正反復と速度解決で再利用します。
 - 粒子同士の候補探索は、分散時にはおおむね`O(N)`に近づきます。
 - 粒子が密集した最悪時には`O(N²)`へ近づきます。
 - 静的コライダー判定は現在、各粒子から全コライダーを見るため`O(N × M)`です。
-- これらの位置補正を`I`回繰り返します。
+- 候補ペアと静的コライダーの位置補正を`I`回繰り返します。
 - さらに全体を`substepCount`回実行します。
 
 静的コライダーが増えた場合は、コライダー側にもBVH、グリッド、AABBツリーなどの広域判定を導入する余地があります。
@@ -595,7 +691,7 @@ ParticleWorldは学習しやすさと汎用的な土台を優先した簡易実�
 - 粒子の回転、角速度、トルク
 - Sphere以外の動的粒子
 - 動的剛体
-- 静的コライダーの表面速度を明示的に計算して粒子へ伝える処理
+- 回転・変形を含む静的コライダーの接触点ごとの表面速度
 - スリープ処理
 - 衝突レイヤーとマスク
 - 衝突イベント
@@ -605,7 +701,8 @@ ParticleWorldは学習しやすさと汎用的な土台を優先した簡易実�
 `SetColliderShape()`を使えば静的コライダーの位置や大きさは更新できます。
 ParticleWorldは前回と現在の形状を保存し、各サブステップで線形補間した形状を衝突判定に使います。
 このため、1フレーム内で適度に移動するコライダーは、現在位置だけで判定する場合よりすり抜けにくくなります。
-ただし、回転の補間、厳密な連続衝突判定、接触点の表面速度計算は行っていません。
+平行移動については、前回と現在の基準位置から線形速度を計算し、反発と摩擦へ使用します。
+ただし、回転の補間、厳密な連続衝突判定、回転や変形による接触点ごとの表面速度計算は行っていません。
 非常に大きな瞬間移動ではすり抜ける可能性があるため、必要に応じて`substepCount`を増やしてください。
 
 ## 19. 中華鍋へ発展させる場合
@@ -613,12 +710,13 @@ ParticleWorldは前回と現在の形状を保存し、各サブステップで�
 今回のParticleWorldは、炒飯を構成する多数の粒を動かす基礎になります。
 中華鍋を振った動きを粒子へ正しく伝えるには、次の拡張が考えられます。
 
-現在はコライダーの前回形状と現在形状を保存し、サブステップごとに補間するところまで実装しています。
+現在はコライダーの前回形状と現在形状を保存し、サブステップごとに補間しています。
+さらに平行移動の速度を求め、粒子との相対速度を使って反発と摩擦を計算しています。
 さらに鍋を振った動きを粒子へ正確に伝えるには、次の拡張が考えられます。
 
-1. 接触点におけるコライダーの表面速度を計算する。
-2. 粒子と表面の相対速度を使って反発と摩擦を計算する。
-3. 回転するコライダーの姿勢を補間する。
+1. 回転するコライダーの姿勢を補間する。
+2. 角速度から接触点ごとの表面速度を計算する。
+3. 変形する形状の表面速度を計算する。
 4. 必要に応じて連続衝突判定を追加する。
 
 炒飯らしいまとまりを追加する場合は、次の順番で拡張すると挙動を確認しやすくなります。
@@ -639,7 +737,7 @@ ParticleWorldは前回と現在の形状を保存し、各サブステップで�
 2. `ParticleWorld::Add()`で内部スロットへの保存方法を見る。
 3. `ParticleWorld::Step()`の外側から、サブステップの構造を追う。
 4. 重力による積分処理を見る。
-5. `forEachParticlePair`で空間ハッシュの使い方を見る。
+5. `buildParticlePairs`で空間ハッシュと候補ペアの作り方を見る。
 6. 粒子同士の位置補正を見る。
 7. `FindContact()`でSphere、SphericalCap、SphericalShellCap、AABBとの接触計算を見る。
 8. 補正後の速度再計算と反発処理を見る。

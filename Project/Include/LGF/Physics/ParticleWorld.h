@@ -56,7 +56,23 @@ namespace LGF::Physics {
 		uint32_t substepCount = 2u;
 		uint32_t solverIterationCount = 4u;
 		float linearDamping = 0.1f;
+		float penetrationSlop = 0.005f;
+		float positionCorrectionRate = 0.2f;
+		float maximumDepenetrationVelocity = 5.0f;
+		float bounceVelocityThreshold = 0.8f;
 		float maximumDeltaTime = 1.0f / 15.0f;
+	};
+
+	// 直前のStepで計測した処理時間と衝突候補数。
+	// 時間の単位はすべてミリ秒で、候補数は全サブステップの合計を表す。
+	struct ParticleWorldStepStatistics {
+		double totalMilliseconds = 0.0;
+		double integrationMilliseconds = 0.0;
+		double broadPhaseMilliseconds = 0.0;
+		double positionSolveMilliseconds = 0.0;
+		double velocitySolveMilliseconds = 0.0;
+		double cleanupMilliseconds = 0.0;
+		uint64_t candidatePairCount = 0u;
 	};
 
 	using StaticColliderShape = std::variant<
@@ -142,8 +158,10 @@ namespace LGF::Physics {
 
 		void SetSettings(const ParticleWorldSettings& settings);
 		const ParticleWorldSettings& GetSettings() const;
+		const ParticleWorldStepStatistics& GetLastStepStatistics() const;
 
 		void Clear();
+		// 指定時間だけシミュレーションを進め、衝突解決と範囲外粒子の削除を行う。
 		void Step(float deltaTime);
 
 	private:
@@ -182,6 +200,7 @@ namespace LGF::Physics {
 		std::vector<uint32_t> freeColliderIndices_;
 		std::size_t particleCount_ = 0u;
 		std::size_t colliderCount_ = 0u;
+		ParticleWorldStepStatistics lastStepStatistics_{};
 	};
 
 }

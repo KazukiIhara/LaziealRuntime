@@ -6,6 +6,7 @@
 
 #include <algorithm>
 #include <array>
+#include <chrono>
 #include <cmath>
 #include <type_traits>
 #include <unordered_map>
@@ -64,6 +65,19 @@ namespace {
 		result.linearDamping = std::isfinite(result.linearDamping)
 			? std::max(result.linearDamping, 0.0f)
 			: 0.1f;
+		result.penetrationSlop = std::isfinite(result.penetrationSlop)
+			? std::max(result.penetrationSlop, 0.0f)
+			: 0.005f;
+		result.positionCorrectionRate = std::isfinite(result.positionCorrectionRate)
+			? std::clamp(result.positionCorrectionRate, 0.0f, 1.0f)
+			: 0.2f;
+		result.maximumDepenetrationVelocity =
+			std::isfinite(result.maximumDepenetrationVelocity)
+			? std::max(result.maximumDepenetrationVelocity, 0.0f)
+			: 5.0f;
+		result.bounceVelocityThreshold = std::isfinite(result.bounceVelocityThreshold)
+			? std::max(result.bounceVelocityThreshold, 0.0f)
+			: 0.8f;
 		if (!std::isfinite(result.maximumDeltaTime) || result.maximumDeltaTime <= 0.0f) {
 			result.maximumDeltaTime = 1.0f / 15.0f;
 		}
@@ -135,6 +149,34 @@ namespace {
 		} };
 	}
 
+	Vector3 GetColliderReferencePosition(
+		const LGF::Physics::StaticColliderShape& shape) {
+		return std::visit([](const auto& collider) -> Vector3 {
+			using T = std::decay_t<decltype(collider)>;
+			if constexpr (std::is_same_v<T, Collision::Sphere>) {
+				return collider.center;
+			} else if constexpr (std::is_same_v<T, Collision::SphericalCap>) {
+				return collider.apex;
+			} else if constexpr (std::is_same_v<T, Collision::SphericalShellCap>) {
+				return collider.outerApex;
+			} else {
+				return (collider.min + collider.max) * 0.5f;
+			}
+		}, shape);
+	}
+
+	Vector3 CalculateColliderLinearVelocity(
+		const LGF::Physics::StaticColliderShape& previous,
+		const LGF::Physics::StaticColliderShape& current,
+		float frameTime) {
+		if (previous.index() != current.index() || frameTime <= 0.0f) {
+			return {};
+		}
+		return (
+			GetColliderReferencePosition(current) -
+			GetColliderReferencePosition(previous)) / frameTime;
+	}
+
 	struct GridCell {
 		int32_t x = 0;
 		int32_t y = 0;
@@ -152,6 +194,11 @@ namespace {
 				0x9e3779b9u + (result << 6u) + (result >> 2u);
 			return result;
 		}
+	};
+
+	struct ParticlePair {
+		uint32_t firstIndex = 0u;
+		uint32_t secondIndex = 0u;
 	};
 
 	GridCell ToGridCell(const Vector3& position, float cellSize) {
@@ -624,36 +671,62 @@ namespace LGF::Physics {
 		return settings_;
 	}
 
+	const ParticleWorldStepStatistics& ParticleWorld::GetLastStepStatistics() const {
+		return lastStepStatistics_;
+	}
+
 	void ParticleWorld::Clear() {
 		ClearParticles();
 		ClearColliders();
 	}
 
 	void ParticleWorld::Step(float deltaTime) {
+		using StepClock = std::chrono::steady_clock;
+		const auto toMilliseconds = [](StepClock::duration duration) {
+			return std::chrono::duration<double, std::milli>(duration).count();
+		};
+
+		lastStepStatistics_ = {};
+		// 0以下や非数の経過時間では、安全のためシミュレーションを進めない。
 		if (!std::isfinite(deltaTime) || deltaTime <= 0.0f) {
 			return;
 		}
+		const StepClock::time_point stepStart = StepClock::now();
 		if (particleCount_ == 0u) {
+			// 粒子がない間も現在形状を記録し、次に粒子を追加したときに
+			// コライダーが過去位置から急移動したものとして扱われることを防ぐ。
 			for (ColliderSlot& collider : colliders_) {
 				if (collider.occupied) {
 					collider.previousShape = collider.shape;
 				}
 			}
+			lastStepStatistics_.totalMilliseconds =
+				toMilliseconds(StepClock::now() - stepStart);
 			return;
 		}
 
+		// 極端に大きなdeltaTimeは1回の移動量とめり込みを増やすため、上限を設ける。
+		// さらに時間をサブステップへ分割し、衝突を見落としにくくする。
 		const float frameTime = std::min(deltaTime, settings_.maximumDeltaTime);
 		const float substepTime = frameTime / static_cast<float>(settings_.substepCount);
+		// 指数減衰にすると、サブステップ数が変わっても減衰の強さが変わりにくい。
 		const float damping = std::exp(-settings_.linearDamping * substepTime);
 
+		// 位置ソルバー中に見つかった静的コライダーとの接触情報を蓄積する。
+		// 位置補正後に、この情報を使って反発と摩擦を速度へ反映する。
 		struct ContactAccumulator {
 			Vector3 normal{};
+			Vector3 surfaceVelocity{};
 			float restitution = 0.0f;
 			float friction = 0.0f;
+			uint32_t contactCount = 0u;
 			bool collided = false;
 		};
 
-		auto forEachParticlePair = [&](auto&& callback) {
+		auto buildParticlePairs = [&]() {
+			std::vector<ParticlePair> pairs;
+			// 全組み合わせを調べると粒子数の2乗だけ処理が増えるため、
+			// 空間を格子に分け、同じセルと周囲26セルにいる粒子だけを候補にする。
 			float maximumRadius = 0.0f;
 			for (const ParticleSlot& particle : particles_) {
 				if (particle.occupied && particle.enabled) {
@@ -661,10 +734,11 @@ namespace LGF::Physics {
 				}
 			}
 			if (maximumRadius <= 0.0f) {
-				return;
+				return pairs;
 			}
 
 			const float cellSize = maximumRadius * 2.0f;
+			pairs.reserve(particleCount_);
 			std::unordered_map<GridCell, std::vector<uint32_t>, GridCellHash> grid;
 			grid.reserve(particleCount_);
 			for (uint32_t index = 0u; index < particles_.size(); ++index) {
@@ -680,6 +754,7 @@ namespace LGF::Physics {
 					continue;
 				}
 				const GridCell center = ToGridCell(first.position, cellSize);
+				// 粒子の直径をセル幅にしているため、接触候補は隣接セルまで調べればよい。
 				for (int32_t z = -1; z <= 1; ++z) {
 					for (int32_t y = -1; y <= 1; ++y) {
 						for (int32_t x = -1; x <= 1; ++x) {
@@ -694,29 +769,49 @@ namespace LGF::Physics {
 							}
 							for (const uint32_t secondIndex : iterator->second) {
 								if (secondIndex > firstIndex) {
-									callback(firstIndex, secondIndex);
+									pairs.push_back({ firstIndex, secondIndex });
 								}
 							}
 						}
 					}
 				}
 			}
+			return pairs;
 		};
 
 		for (uint32_t substep = 0u; substep < settings_.substepCount; ++substep) {
+			// 動くコライダーをフレーム開始位置から現在位置まで少しずつ進める。
+			// いきなり最終位置へ移動させず、各サブステップで衝突を確認する。
 			const float colliderInterpolation =
 				static_cast<float>(substep + 1u) /
 				static_cast<float>(settings_.substepCount);
 			std::vector<ContactAccumulator> contacts(particles_.size());
+			// めり込み解消のためだけに動かした距離を記録する。
+			// 後で速度を求める際に差し引き、押し出しを運動速度へ変換させない。
+			std::vector<Vector3> positionCorrections(particles_.size());
 			std::vector<StaticColliderShape> interpolatedColliderShapes;
+			std::vector<Vector3> colliderLinearVelocities;
 			interpolatedColliderShapes.reserve(colliders_.size());
+			colliderLinearVelocities.reserve(colliders_.size());
 			for (const ColliderSlot& collider : colliders_) {
 				interpolatedColliderShapes.push_back(InterpolateColliderShape(
 					collider.previousShape,
 					collider.shape,
 					colliderInterpolation));
+				colliderLinearVelocities.push_back(CalculateColliderLinearVelocity(
+					collider.previousShape,
+					collider.shape,
+					frameTime));
 			}
+			// 深いめり込みを1回で直すと位置が急変するため、
+			// 1反復で許可する補正距離へ変換して上限をかける。
+			const float maximumCorrectionPerIteration =
+				settings_.maximumDepenetrationVelocity * substepTime /
+				static_cast<float>(settings_.solverIterationCount);
 
+			// 重力と外力から速度を更新し、その速度で衝突前の予測位置へ進める。
+			// 速度を先に更新するため、積分方法は半陰的オイラー法に相当する。
+			const StepClock::time_point integrationStart = StepClock::now();
 			for (ParticleSlot& particle : particles_) {
 				if (!particle.occupied || !particle.enabled) {
 					continue;
@@ -731,41 +826,60 @@ namespace LGF::Physics {
 				particle.velocity += acceleration * substepTime;
 				particle.position += particle.velocity * substepTime;
 			}
+			lastStepStatistics_.integrationMilliseconds +=
+				toMilliseconds(StepClock::now() - integrationStart);
+
+			// 予測位置を使って候補ペアを一度だけ作り、位置補正と速度解決で共有する。
+			const StepClock::time_point broadPhaseStart = StepClock::now();
+			const std::vector<ParticlePair> particlePairs = buildParticlePairs();
+			lastStepStatistics_.broadPhaseMilliseconds +=
+				toMilliseconds(StepClock::now() - broadPhaseStart);
+			lastStepStatistics_.candidatePairCount += particlePairs.size();
 
 			auto recordContact = [&](
 				uint32_t particleIndex,
 				const Vector3& normal,
+				const Vector3& surfaceVelocity,
 				const CollisionParameter& particleParameter,
 				const CollisionParameter& colliderParameter) {
 				ContactAccumulator& contact = contacts[particleIndex];
 				contact.normal += normal;
+				contact.surfaceVelocity += surfaceVelocity;
 				contact.restitution = std::max(
 					contact.restitution,
 					std::max(particleParameter.restitution, colliderParameter.restitution));
 				contact.friction = std::max(
 					contact.friction,
 					std::sqrt(particleParameter.friction * colliderParameter.friction));
+				++contact.contactCount;
 				contact.collided = true;
 			};
 
+			// 位置補正を複数回繰り返すことで、複数の粒子やコライダーに
+			// 同時に挟まれた場合でも、少しずつめり込みを解消する。
+			const StepClock::time_point positionSolveStart = StepClock::now();
 			for (uint32_t iteration = 0u;
 				iteration < settings_.solverIterationCount;
 				++iteration) {
-				forEachParticlePair([&](uint32_t firstIndex, uint32_t secondIndex) {
+				for (const ParticlePair& pair : particlePairs) {
+					const uint32_t firstIndex = pair.firstIndex;
+					const uint32_t secondIndex = pair.secondIndex;
 					ParticleSlot& first = particles_[firstIndex];
 					ParticleSlot& second = particles_[secondIndex];
 					const float inverseMassSum = first.inverseMass + second.inverseMass;
 					if (inverseMassSum <= 0.0f) {
-						return;
+						continue;
 					}
 
 					const Vector3 delta = second.position - first.position;
 					const float minimumDistance = first.radius + second.radius;
 					const float distanceSq = Math::LengthSq(delta);
 					if (distanceSq >= minimumDistance * minimumDistance) {
-						return;
+						continue;
 					}
 
+					// 中心が完全に一致すると法線を計算できないため、
+					// 粒子番号から決めた固定方向を予備の法線として使う。
 					const Vector3 fallback = (firstIndex + secondIndex) % 3u == 0u
 						? Vector3{ 1.0f, 0.0f, 0.0f }
 						: ((firstIndex + secondIndex) % 3u == 1u
@@ -773,11 +887,22 @@ namespace LGF::Physics {
 							: Vector3{ 0.0f, 0.0f, 1.0f });
 					const Vector3 normal = SafeNormal(delta, fallback);
 					const float distance = std::sqrt(std::max(distanceSq, 0.0f));
+					const float effectivePenetration = std::max(
+						minimumDistance - distance - settings_.penetrationSlop,
+						0.0f);
+					const float correctionDepth = std::min(
+						effectivePenetration * settings_.positionCorrectionRate,
+						maximumCorrectionPerIteration);
+					// 軽い粒子ほど大きく動くように、補正量を逆質量の比率で分配する。
 					const Vector3 correction =
-						normal * ((minimumDistance - distance) / inverseMassSum);
-					first.position -= correction * first.inverseMass;
-					second.position += correction * second.inverseMass;
-				});
+						normal * (correctionDepth / inverseMassSum);
+					const Vector3 firstCorrection = -correction * first.inverseMass;
+					const Vector3 secondCorrection = correction * second.inverseMass;
+					first.position += firstCorrection;
+					second.position += secondCorrection;
+					positionCorrections[firstIndex] += firstCorrection;
+					positionCorrections[secondIndex] += secondCorrection;
+				}
 
 				for (uint32_t particleIndex = 0u;
 					particleIndex < particles_.size();
@@ -798,24 +923,40 @@ namespace LGF::Physics {
 							.center = particle.position,
 							.radius = particle.radius,
 						};
+						// variantに格納された形状に対応するFindContactを呼び出す。
 						std::visit([&](const auto& shape) {
 							const std::optional<StaticContact> contact =
 								FindContact(particleSphere, shape);
 							if (!contact || contact->penetrationDepth <= 0.0f) {
 								return;
 							}
-							particle.position +=
-								contact->normal * contact->penetrationDepth;
+							const float effectivePenetration = std::max(
+								contact->penetrationDepth - settings_.penetrationSlop,
+								0.0f);
+							const float correctionDepth = std::min(
+								effectivePenetration * settings_.positionCorrectionRate,
+								maximumCorrectionPerIteration);
+							const Vector3 correction =
+								contact->normal * correctionDepth;
+							particle.position += correction;
+							positionCorrections[particleIndex] += correction;
 							recordContact(
 								particleIndex,
 								contact->normal,
+								colliderLinearVelocities[colliderIndex],
 								particle.collisionParameter,
 								collider.options.collisionParameter);
 						}, interpolatedColliderShapes[colliderIndex]);
 					}
 				}
 			}
+			lastStepStatistics_.positionSolveMilliseconds +=
+				toMilliseconds(StepClock::now() - positionSolveStart);
 
+			// 補正後の位置から、次のサブステップで使う速度を作り直す。
+			// 純粋な移動量から位置補正量を除くことで、深いめり込みを直した距離が
+			// 巨大な速度へ変換され、粒子が吹き飛ぶことを防いでいる。
+			const StepClock::time_point velocitySolveStart = StepClock::now();
 			for (uint32_t index = 0u; index < particles_.size(); ++index) {
 				ParticleSlot& particle = particles_[index];
 				if (!particle.occupied || !particle.enabled) {
@@ -826,47 +967,64 @@ namespace LGF::Physics {
 					continue;
 				}
 				particle.velocity =
-					(particle.position - particle.previousPosition) / substepTime;
+					(particle.position - particle.previousPosition -
+						positionCorrections[index]) / substepTime;
 				particle.velocity *= damping;
 
 				const ContactAccumulator& contact = contacts[index];
 				if (!contact.collided) {
 					continue;
 				}
+				// 複数回・複数面で得た法線と表面速度をまとめて、この粒子の接触を扱う。
 				const Vector3 normal = SafeNormal(contact.normal, { 0.0f, 1.0f, 0.0f });
-				const float normalSpeed = Math::Dot(particle.velocity, normal);
+				const Vector3 surfaceVelocity =
+					contact.surfaceVelocity / static_cast<float>(contact.contactCount);
+				// 動く床や容器に対する速度へ変換してから、法線方向と接線方向に分解する。
+				const Vector3 relativeVelocity = particle.velocity - surfaceVelocity;
+				const float normalSpeed = Math::Dot(relativeVelocity, normal);
 				if (normalSpeed < 0.0f) {
 					const Vector3 normalVelocity = normal * normalSpeed;
-					const Vector3 tangentVelocity = particle.velocity - normalVelocity;
-					particle.velocity =
+					const Vector3 tangentVelocity = relativeVelocity - normalVelocity;
+					// 低速接触では反発係数を0にし、静止付近で細かく跳ね続けることを防ぐ。
+					const float restitution = -normalSpeed > settings_.bounceVelocityThreshold
+						? contact.restitution
+						: 0.0f;
+					particle.velocity = surfaceVelocity +
 						tangentVelocity * (1.0f - contact.friction) -
-						normalVelocity * contact.restitution;
+						normalVelocity * restitution;
 				}
 			}
 
-			forEachParticlePair([&](uint32_t firstIndex, uint32_t secondIndex) {
+			// 粒子同士の位置補正が終わった状態で、衝突インパルスを速度へ加える。
+			// 法線方向は反発、接線方向は摩擦を担当する。
+			for (const ParticlePair& pair : particlePairs) {
+				const uint32_t firstIndex = pair.firstIndex;
+				const uint32_t secondIndex = pair.secondIndex;
 				ParticleSlot& first = particles_[firstIndex];
 				ParticleSlot& second = particles_[secondIndex];
 				const float inverseMassSum = first.inverseMass + second.inverseMass;
 				if (inverseMassSum <= 0.0f) {
-					return;
+					continue;
 				}
 
 				const Vector3 delta = second.position - first.position;
 				const float minimumDistance = first.radius + second.radius;
 				if (Math::LengthSq(delta) > minimumDistance * minimumDistance + Math::EPSILON) {
-					return;
+					continue;
 				}
 				const Vector3 normal = SafeNormal(delta, { 1.0f, 0.0f, 0.0f });
 				const Vector3 relativeVelocity = second.velocity - first.velocity;
 				const float normalSpeed = Math::Dot(relativeVelocity, normal);
 				if (normalSpeed >= 0.0f) {
-					return;
+					continue;
 				}
 
-				const float restitution = std::max(
-					first.collisionParameter.restitution,
-					second.collisionParameter.restitution);
+				const float restitution = -normalSpeed > settings_.bounceVelocityThreshold
+					? std::max(
+						first.collisionParameter.restitution,
+						second.collisionParameter.restitution)
+					: 0.0f;
+				// 運動量を保つように、両者の逆質量から法線インパルスを計算する。
 				const float normalImpulseMagnitude =
 					-(1.0f + restitution) * normalSpeed / inverseMassSum;
 				const Vector3 normalImpulse = normal * normalImpulseMagnitude;
@@ -876,11 +1034,12 @@ namespace LGF::Physics {
 				const Vector3 tangentVelocity = relativeVelocity - normal * normalSpeed;
 				const float tangentSpeed = Math::Length(tangentVelocity);
 				if (tangentSpeed <= Math::EPSILON) {
-					return;
+					continue;
 				}
 				const float friction = std::sqrt(
 					first.collisionParameter.friction *
 					second.collisionParameter.friction);
+				// 接線インパルスはクーロン摩擦として、法線インパルスに比例する値で制限する。
 				const float tangentImpulseMagnitude = std::min(
 					tangentSpeed / inverseMassSum,
 					friction * normalImpulseMagnitude);
@@ -888,9 +1047,14 @@ namespace LGF::Physics {
 					-tangentVelocity / tangentSpeed * tangentImpulseMagnitude;
 				first.velocity -= tangentImpulse * first.inverseMass;
 				second.velocity += tangentImpulse * second.inverseMass;
-			});
+			}
+			lastStepStatistics_.velocitySolveMilliseconds +=
+				toMilliseconds(StepClock::now() - velocitySolveStart);
 		}
 
+		// 外力は1フレームだけ有効として消去する。
+		// ワールド範囲を出た粒子もここで破棄し、落下し続ける粒子を残さない。
+		const StepClock::time_point cleanupStart = StepClock::now();
 		for (uint32_t index = 0u; index < particles_.size(); ++index) {
 			ParticleSlot& particle = particles_[index];
 			if (!particle.occupied) {
@@ -902,11 +1066,17 @@ namespace LGF::Physics {
 			}
 		}
 
+		// 今回の形状を次フレームの開始形状として保存する。
+		// 次回のStepでは、この形状との差から補間位置と表面速度を計算する。
 		for (ColliderSlot& collider : colliders_) {
 			if (collider.occupied) {
 				collider.previousShape = collider.shape;
 			}
 		}
+		lastStepStatistics_.cleanupMilliseconds =
+			toMilliseconds(StepClock::now() - cleanupStart);
+		lastStepStatistics_.totalMilliseconds =
+			toMilliseconds(StepClock::now() - stepStart);
 	}
 
 	ParticleWorld::ParticleSlot* ParticleWorld::FindParticle(ParticleHandle handle) {
