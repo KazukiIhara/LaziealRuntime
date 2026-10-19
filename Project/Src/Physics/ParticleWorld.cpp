@@ -85,6 +85,56 @@ namespace {
 		}, shape);
 	}
 
+	Vector3 Lerp(const Vector3& start, const Vector3& end, float t) {
+		return start + (end - start) * t;
+	}
+
+	LGF::Physics::StaticColliderShape InterpolateColliderShape(
+		const LGF::Physics::StaticColliderShape& previous,
+		const LGF::Physics::StaticColliderShape& current,
+		float t) {
+		using LGF::Physics::StaticColliderShape;
+		if (previous.index() != current.index()) {
+			return current;
+		}
+
+		if (const auto* end = std::get_if<Collision::Sphere>(&current)) {
+			const auto& start = std::get<Collision::Sphere>(previous);
+			return StaticColliderShape{ Collision::Sphere{
+				.center = Lerp(start.center, end->center, t),
+				.radius = std::lerp(start.radius, end->radius, t),
+			} };
+		}
+		if (const auto* end = std::get_if<Collision::SphericalCap>(&current)) {
+			const auto& start = std::get<Collision::SphericalCap>(previous);
+			Collision::SphericalCap result{
+				.apex = Lerp(start.apex, end->apex, t),
+				.axis = Lerp(start.axis, end->axis, t),
+				.baseRadius = std::lerp(start.baseRadius, end->baseRadius, t),
+				.height = std::lerp(start.height, end->height, t),
+			};
+			return Collision::IsValid(result) ? StaticColliderShape{ result } : current;
+		}
+		if (const auto* end = std::get_if<Collision::SphericalShellCap>(&current)) {
+			const auto& start = std::get<Collision::SphericalShellCap>(previous);
+			Collision::SphericalShellCap result{
+				.outerApex = Lerp(start.outerApex, end->outerApex, t),
+				.axis = Lerp(start.axis, end->axis, t),
+				.outerRadius = std::lerp(start.outerRadius, end->outerRadius, t),
+				.innerRadius = std::lerp(start.innerRadius, end->innerRadius, t),
+				.height = std::lerp(start.height, end->height, t),
+			};
+			return Collision::IsValid(result) ? StaticColliderShape{ result } : current;
+		}
+
+		const auto& start = std::get<Collision::AABB>(previous);
+		const auto& end = std::get<Collision::AABB>(current);
+		return StaticColliderShape{ Collision::AABB{
+			.min = Lerp(start.min, end.min, t),
+			.max = Lerp(start.max, end.max, t),
+		} };
+	}
+
 	struct GridCell {
 		int32_t x = 0;
 		int32_t y = 0;
@@ -130,6 +180,56 @@ namespace {
 		return StaticContact{
 			.normal = SafeNormal(offset, { 0.0f, 1.0f, 0.0f }),
 			.penetrationDepth = minimumDistance - distance,
+		};
+	}
+
+	std::optional<StaticContact> FindContact(
+		const Collision::Sphere& particle,
+		const Collision::SphericalCap& collider) {
+		if (!Collision::IsValid(particle) || !Collision::IsValid(collider)) {
+			return std::nullopt;
+		}
+
+		const Vector3 axis = Math::Normalize(collider.axis);
+		const float sphereRadius =
+			(collider.baseRadius * collider.baseRadius +
+				collider.height * collider.height) /
+			(2.0f * collider.height);
+		const Vector3 sphereCenter = collider.apex + axis * sphereRadius;
+		const Vector3 centerOffset = particle.center - sphereCenter;
+		const float centerDistance = Math::Length(centerOffset);
+		const Vector3 surfaceDirection = SafeNormal(centerOffset, -axis);
+		const Vector3 surfacePoint = sphereCenter + surfaceDirection * sphereRadius;
+		const float surfaceHeight = Math::Dot(surfacePoint - collider.apex, axis);
+		if (surfaceHeight < -Math::EPSILON ||
+			surfaceHeight > collider.height + Math::EPSILON) {
+			return std::nullopt;
+		}
+
+		const float penetrationDepth = centerDistance + particle.radius - sphereRadius;
+		if (penetrationDepth < 0.0f) {
+			return std::nullopt;
+		}
+
+		return StaticContact{
+			.normal = -surfaceDirection,
+			.penetrationDepth = penetrationDepth,
+		};
+	}
+
+	std::optional<StaticContact> FindContact(
+		const Collision::Sphere& particle,
+		const Collision::SphericalShellCap& collider) {
+		const std::optional<Collision::Contact> contact =
+			Collision::Collide(particle, collider);
+		if (!contact) {
+			return std::nullopt;
+		}
+
+		const bool centerInsideMaterial = Collision::Contains(collider, particle.center);
+		return StaticContact{
+			.normal = centerInsideMaterial ? contact->normal : -contact->normal,
+			.penetrationDepth = contact->penetrationDepth,
 		};
 	}
 
@@ -409,6 +509,7 @@ namespace LGF::Physics {
 		const uint32_t generation = collider.generation;
 		collider = ColliderSlot{
 			.shape = shape,
+			.previousShape = shape,
 			.options = options,
 			.generation = generation,
 			.occupied = true,
@@ -423,6 +524,18 @@ namespace LGF::Physics {
 		const Collision::Sphere& sphere,
 		const StaticColliderOptions& options) {
 		return AddCollider(StaticColliderShape{ sphere }, options);
+	}
+
+	StaticColliderHandle ParticleWorld::AddCollider(
+		const Collision::SphericalCap& sphericalCap,
+		const StaticColliderOptions& options) {
+		return AddCollider(StaticColliderShape{ sphericalCap }, options);
+	}
+
+	StaticColliderHandle ParticleWorld::AddCollider(
+		const Collision::SphericalShellCap& sphericalShellCap,
+		const StaticColliderOptions& options) {
+		return AddCollider(StaticColliderShape{ sphericalShellCap }, options);
 	}
 
 	StaticColliderHandle ParticleWorld::AddCollider(
@@ -517,7 +630,15 @@ namespace LGF::Physics {
 	}
 
 	void ParticleWorld::Step(float deltaTime) {
-		if (!std::isfinite(deltaTime) || deltaTime <= 0.0f || particleCount_ == 0u) {
+		if (!std::isfinite(deltaTime) || deltaTime <= 0.0f) {
+			return;
+		}
+		if (particleCount_ == 0u) {
+			for (ColliderSlot& collider : colliders_) {
+				if (collider.occupied) {
+					collider.previousShape = collider.shape;
+				}
+			}
 			return;
 		}
 
@@ -583,7 +704,18 @@ namespace LGF::Physics {
 		};
 
 		for (uint32_t substep = 0u; substep < settings_.substepCount; ++substep) {
+			const float colliderInterpolation =
+				static_cast<float>(substep + 1u) /
+				static_cast<float>(settings_.substepCount);
 			std::vector<ContactAccumulator> contacts(particles_.size());
+			std::vector<StaticColliderShape> interpolatedColliderShapes;
+			interpolatedColliderShapes.reserve(colliders_.size());
+			for (const ColliderSlot& collider : colliders_) {
+				interpolatedColliderShapes.push_back(InterpolateColliderShape(
+					collider.previousShape,
+					collider.shape,
+					colliderInterpolation));
+			}
 
 			for (ParticleSlot& particle : particles_) {
 				if (!particle.occupied || !particle.enabled) {
@@ -655,7 +787,10 @@ namespace LGF::Physics {
 						continue;
 					}
 
-					for (const ColliderSlot& collider : colliders_) {
+					for (std::size_t colliderIndex = 0u;
+						colliderIndex < colliders_.size();
+						++colliderIndex) {
+						const ColliderSlot& collider = colliders_[colliderIndex];
 						if (!collider.occupied || !collider.options.enabled) {
 							continue;
 						}
@@ -676,7 +811,7 @@ namespace LGF::Physics {
 								contact->normal,
 								particle.collisionParameter,
 								collider.options.collisionParameter);
-						}, collider.shape);
+						}, interpolatedColliderShapes[colliderIndex]);
 					}
 				}
 			}
@@ -764,6 +899,12 @@ namespace LGF::Physics {
 			particle.force = {};
 			if (!Collision::Contains(settings_.worldBounds, particle.position)) {
 				RemoveParticleAt(index);
+			}
+		}
+
+		for (ColliderSlot& collider : colliders_) {
+			if (collider.occupied) {
+				collider.previousShape = collider.shape;
 			}
 		}
 	}

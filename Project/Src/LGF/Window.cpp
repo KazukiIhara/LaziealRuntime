@@ -37,3 +37,7 @@ std::wstring LGF::Window::GetTitle() {
 bool LGF::Window::IsFullscreen() {
 	return Detail::GetFramework().IsWindowFullscreen();
 }
+
+bool LGF::Window::IsFocused() {
+	return Detail::GetFramework().IsWindowFocused();
+}

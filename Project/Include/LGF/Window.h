@@ -19,5 +19,7 @@ namespace LGF::Window {
 	Size GetSize();
 	std::wstring GetTitle();
 	bool IsFullscreen();
+	/// <summary>ゲームウィンドウが現在操作対象になっているかを返す。</summary>
+	bool IsFocused();
 
 }

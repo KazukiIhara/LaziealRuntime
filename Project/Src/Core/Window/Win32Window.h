@@ -46,6 +46,7 @@ namespace LGF {
 		Size GetSize() const;
 		std::wstring GetTitle() const;
 		bool IsFullscreen() const;
+		bool IsFocused() const;
 		void SetRawInputHandler(RawInputHandler handler);
 		void SetMessageHandler(MessageHandler handler);
 

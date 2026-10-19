@@ -168,6 +168,10 @@ bool Framework::IsWindowFullscreen() const {
 	return windowSystem_ && windowSystem_->GetWindow().IsFullscreen();
 }
 
+bool Framework::IsWindowFocused() const {
+	return windowSystem_ && windowSystem_->GetWindow().IsFocused();
+}
+
 void Framework::BeginFrame() {
 	timeSystem_->BeginFrame();
 	inputSystem_->BeginFrame();

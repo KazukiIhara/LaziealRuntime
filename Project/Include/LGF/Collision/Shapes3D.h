@@ -13,6 +13,33 @@ namespace LGF::Collision {
 	};
 
 	/// <summary>
+	/// 円形の境界を持つ、閉じていない球面。
+	/// apex は球面の頂点、axis は頂点から円形境界へ向かう軸を表す。
+	/// baseRadius は円形境界の半径、height は頂点から境界までの軸方向の距離。
+	/// axis は単位ベクトルでなくてもよい。
+	/// </summary>
+	struct SphericalCap {
+		Vector3 apex{};
+		Vector3 axis{ 0.0f, 1.0f, 0.0f };
+		float baseRadius = 1.0f;
+		float height = 0.5f;
+	};
+
+	/// <summary>
+	/// 同心の内外球面と、開口部の環状面で囲まれた厚みのある球殻。
+	/// outerApex は外側球面の頂点、axis は頂点から開口部へ向かう軸を表す。
+	/// height は outerApex から開口平面までの軸方向の距離。
+	/// axis は単位ベクトルでなくてもよい。
+	/// </summary>
+	struct SphericalShellCap {
+		Vector3 outerApex{};
+		Vector3 axis{ 0.0f, 1.0f, 0.0f };
+		float outerRadius = 2.0f;
+		float innerRadius = 1.8f;
+		float height = 1.0f;
+	};
+
+	/// <summary>
 	/// 軸平行境界ボックス。各成分で min &lt;= max となるように指定する。
 	/// </summary>
 	struct AABB {

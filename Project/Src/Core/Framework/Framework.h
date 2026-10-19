@@ -34,6 +34,7 @@ namespace LGF {
 		uint32_t GetWindowHeight() const;
 		std::wstring GetWindowTitle() const;
 		bool IsWindowFullscreen() const;
+		bool IsWindowFocused() const;
 
 	private:
 		void BeginFrame();

@@ -207,6 +207,10 @@ bool Win32Window::IsFullscreen() const {
 	return setting_.fullscreen;
 }
 
+bool Win32Window::IsFocused() const {
+	return hwnd_ != nullptr && GetForegroundWindow() == hwnd_;
+}
+
 void Win32Window::SetRawInputHandler(RawInputHandler handler) {
 	rawInputHandler_ = std::move(handler);
 }

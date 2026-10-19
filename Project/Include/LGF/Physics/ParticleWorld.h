@@ -59,7 +59,11 @@ namespace LGF::Physics {
 		float maximumDeltaTime = 1.0f / 15.0f;
 	};
 
-	using StaticColliderShape = std::variant<Collision::Sphere, Collision::AABB>;
+	using StaticColliderShape = std::variant<
+		Collision::Sphere,
+		Collision::SphericalCap,
+		Collision::SphericalShellCap,
+		Collision::AABB>;
 
 	struct StaticColliderHandle {
 		static constexpr uint32_t InvalidIndex = std::numeric_limits<uint32_t>::max();
@@ -113,6 +117,12 @@ namespace LGF::Physics {
 			const Collision::Sphere& sphere,
 			const StaticColliderOptions& options = {});
 		StaticColliderHandle AddCollider(
+			const Collision::SphericalCap& sphericalCap,
+			const StaticColliderOptions& options = {});
+		StaticColliderHandle AddCollider(
+			const Collision::SphericalShellCap& sphericalShellCap,
+			const StaticColliderOptions& options = {});
+		StaticColliderHandle AddCollider(
 			const Collision::AABB& box,
 			const StaticColliderOptions& options = {});
 		bool RemoveCollider(StaticColliderHandle handle);
@@ -153,6 +163,7 @@ namespace LGF::Physics {
 
 		struct ColliderSlot {
 			StaticColliderShape shape{};
+			StaticColliderShape previousShape{};
 			StaticColliderOptions options{};
 			uint32_t generation = 1u;
 			bool occupied = false;

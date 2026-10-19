@@ -34,6 +34,115 @@ namespace {
 		};
 	}
 
+	struct SphericalShellCapGeometry {
+		Vector3 axis{};
+		Vector3 sphereCenter{};
+		float openingPlaneOffset = 0.0f;
+		float outerOpeningRadius = 0.0f;
+		float innerOpeningRadius = 0.0f;
+	};
+
+	SphericalShellCapGeometry MakeGeometry(
+		const LGF::Collision::SphericalShellCap& shape) {
+		const Vector3 axis = Math::Normalize(shape.axis);
+		const float openingPlaneOffset = shape.height - shape.outerRadius;
+		return {
+			.axis = axis,
+			.sphereCenter = shape.outerApex + axis * shape.outerRadius,
+			.openingPlaneOffset = openingPlaneOffset,
+			.outerOpeningRadius = std::sqrt(std::max(
+				shape.outerRadius * shape.outerRadius -
+					openingPlaneOffset * openingPlaneOffset,
+				0.0f)),
+			.innerOpeningRadius = std::sqrt(std::max(
+				shape.innerRadius * shape.innerRadius -
+					openingPlaneOffset * openingPlaneOffset,
+				0.0f)),
+		};
+	}
+
+	Vector3 PerpendicularTo(const Vector3& axis) {
+		const Vector3 reference = std::abs(axis.y) < 0.9f
+			? Vector3{ 0.0f, 1.0f, 0.0f }
+			: Vector3{ 1.0f, 0.0f, 0.0f };
+		return Math::Normalize(Math::Cross(axis, reference));
+	}
+
+	Vector3 ClosestPointOnCircle(
+		const Vector3& point,
+		const Vector3& circleCenter,
+		const Vector3& axis,
+		float radius) {
+		const Vector3 offset = point - circleCenter;
+		const Vector3 radial = offset - axis * Math::Dot(offset, axis);
+		return circleCenter + SafeNormal(radial, PerpendicularTo(axis)) * radius;
+	}
+
+	Vector3 ClosestPointOnSphericalCapSurface(
+		const Vector3& point,
+		const SphericalShellCapGeometry& geometry,
+		float radius,
+		float openingRadius) {
+		const Vector3 direction = SafeNormal(
+			point - geometry.sphereCenter,
+			-geometry.axis);
+		const Vector3 spherePoint = geometry.sphereCenter + direction * radius;
+		if (Math::Dot(spherePoint - geometry.sphereCenter, geometry.axis) <=
+			geometry.openingPlaneOffset) {
+			return spherePoint;
+		}
+
+		const Vector3 circleCenter = geometry.sphereCenter +
+			geometry.axis * geometry.openingPlaneOffset;
+		return ClosestPointOnCircle(point, circleCenter, geometry.axis, openingRadius);
+	}
+
+	Vector3 ClosestPointOnOpeningRing(
+		const Vector3& point,
+		const SphericalShellCapGeometry& geometry) {
+		const Vector3 ringCenter = geometry.sphereCenter +
+			geometry.axis * geometry.openingPlaneOffset;
+		const Vector3 offset = point - ringCenter;
+		const Vector3 radial = offset - geometry.axis * Math::Dot(offset, geometry.axis);
+		const float radialLength = Math::Length(radial);
+		const Vector3 radialDirection = SafeNormal(radial, PerpendicularTo(geometry.axis));
+		const float radius = std::clamp(
+			radialLength,
+			geometry.innerOpeningRadius,
+			geometry.outerOpeningRadius);
+		return ringCenter + radialDirection * radius;
+	}
+
+	Vector3 ClosestPointOnSphericalShellCapBoundary(
+		const Vector3& point,
+		const LGF::Collision::SphericalShellCap& shape) {
+		const SphericalShellCapGeometry geometry = MakeGeometry(shape);
+		const std::array<Vector3, 3> candidates{
+			ClosestPointOnSphericalCapSurface(
+				point,
+				geometry,
+				shape.outerRadius,
+				geometry.outerOpeningRadius),
+			ClosestPointOnSphericalCapSurface(
+				point,
+				geometry,
+				shape.innerRadius,
+				geometry.innerOpeningRadius),
+			ClosestPointOnOpeningRing(point, geometry),
+		};
+
+		Vector3 closest = candidates[0];
+		float closestDistanceSq = Math::DistanceSq(point, closest);
+		for (std::size_t index = 1u; index < candidates.size(); ++index) {
+			const float distanceSq = Math::DistanceSq(point, candidates[index]);
+			if (distanceSq < closestDistanceSq) {
+				closest = candidates[index];
+				closestDistanceSq = distanceSq;
+			}
+		}
+		return closest;
+	}
+
 	float GetComponent(const Vector3& value, std::size_t index) {
 		switch (index) {
 		case 0u:
@@ -202,6 +311,23 @@ namespace LGF::Collision {
 		return sphere.radius >= 0.0f;
 	}
 
+	bool IsValid(const SphericalCap& sphericalCap) {
+		return sphericalCap.baseRadius > 0.0f &&
+			sphericalCap.height > 0.0f &&
+			Math::LengthSq(sphericalCap.axis) > Math::EPSILON * Math::EPSILON;
+	}
+
+	bool IsValid(const SphericalShellCap& sphericalShellCap) {
+		const float thickness =
+			sphericalShellCap.outerRadius - sphericalShellCap.innerRadius;
+		return sphericalShellCap.outerRadius > 0.0f &&
+			sphericalShellCap.innerRadius > 0.0f &&
+			sphericalShellCap.outerRadius > sphericalShellCap.innerRadius &&
+			sphericalShellCap.height > thickness &&
+			sphericalShellCap.height <= sphericalShellCap.outerRadius &&
+			Math::LengthSq(sphericalShellCap.axis) > Math::EPSILON * Math::EPSILON;
+	}
+
 	bool IsValid(const AABB& box) {
 		return box.min.x <= box.max.x &&
 			box.min.y <= box.max.y &&
@@ -251,6 +377,20 @@ namespace LGF::Collision {
 	bool Contains(const Sphere& sphere, const Vector3& point) {
 		return IsValid(sphere) &&
 			Math::DistanceSq(sphere.center, point) <= sphere.radius * sphere.radius;
+	}
+
+	bool Contains(const SphericalShellCap& sphericalShellCap, const Vector3& point) {
+		if (!IsValid(sphericalShellCap)) {
+			return false;
+		}
+
+		const SphericalShellCapGeometry geometry = MakeGeometry(sphericalShellCap);
+		const Vector3 offset = point - geometry.sphereCenter;
+		const float distanceSq = Math::LengthSq(offset);
+		const float axialOffset = Math::Dot(offset, geometry.axis);
+		return axialOffset <= geometry.openingPlaneOffset &&
+			distanceSq <= sphericalShellCap.outerRadius * sphericalShellCap.outerRadius &&
+			distanceSq >= sphericalShellCap.innerRadius * sphericalShellCap.innerRadius;
 	}
 
 	bool Contains(const AABB& box, const Vector3& point) {
@@ -305,6 +445,89 @@ namespace LGF::Collision {
 			.normal = normal,
 			.penetrationDepth = penetrationDepth,
 		};
+	}
+
+	std::optional<Contact> Collide(
+		const Sphere& sphere,
+		const SphericalCap& sphericalCap) {
+		if (!IsValid(sphere) || !IsValid(sphericalCap)) {
+			return std::nullopt;
+		}
+
+		const Vector3 axis = Math::Normalize(sphericalCap.axis);
+		const float sphereRadius =
+			(sphericalCap.baseRadius * sphericalCap.baseRadius +
+				sphericalCap.height * sphericalCap.height) /
+			(2.0f * sphericalCap.height);
+		const Vector3 sphereCenter = sphericalCap.apex + axis * sphereRadius;
+		const Vector3 centerOffset = sphere.center - sphereCenter;
+		const float centerDistance = Math::Length(centerOffset);
+		const Vector3 surfaceDirection = SafeNormal(centerOffset, Reverse(axis));
+		const Vector3 surfacePoint = sphereCenter + surfaceDirection * sphereRadius;
+		const float surfaceHeight = Math::Dot(
+			surfacePoint - sphericalCap.apex,
+			axis);
+
+		// 円形境界より先には面がないため、開口部を通る球とは接触しない。
+		if (surfaceHeight < -Math::EPSILON ||
+			surfaceHeight > sphericalCap.height + Math::EPSILON) {
+			return std::nullopt;
+		}
+
+		const float distanceToSurface = std::abs(centerDistance - sphereRadius);
+		if (distanceToSurface > sphere.radius) {
+			return std::nullopt;
+		}
+
+		return Contact{
+			.point = surfacePoint,
+			.normal = SafeNormal(surfacePoint - sphere.center, Reverse(surfaceDirection)),
+			.penetrationDepth = sphere.radius - distanceToSurface,
+		};
+	}
+
+	std::optional<Contact> Collide(
+		const SphericalCap& sphericalCap,
+		const Sphere& sphere) {
+		const std::optional<Contact> contact = Collide(sphere, sphericalCap);
+		return contact ? std::optional<Contact>(ReverseContact(*contact)) : std::nullopt;
+	}
+
+	std::optional<Contact> Collide(
+		const Sphere& sphere,
+		const SphericalShellCap& sphericalShellCap) {
+		if (!IsValid(sphere) || !IsValid(sphericalShellCap)) {
+			return std::nullopt;
+		}
+
+		const Vector3 closest = ClosestPointOnSphericalShellCapBoundary(
+			sphere.center,
+			sphericalShellCap);
+		const Vector3 offset = closest - sphere.center;
+		const float distanceSq = Math::LengthSq(offset);
+		const bool centerInside = Contains(sphericalShellCap, sphere.center);
+		if (!centerInside && distanceSq > sphere.radius * sphere.radius) {
+			return std::nullopt;
+		}
+
+		const float distance = std::sqrt(std::max(distanceSq, 0.0f));
+		const Vector3 fallback = centerInside
+			? Math::Normalize(sphericalShellCap.axis)
+			: -Math::Normalize(sphericalShellCap.axis);
+		return Contact{
+			.point = closest,
+			.normal = SafeNormal(offset, fallback),
+			.penetrationDepth = centerInside
+				? sphere.radius + distance
+				: sphere.radius - distance,
+		};
+	}
+
+	std::optional<Contact> Collide(
+		const SphericalShellCap& sphericalShellCap,
+		const Sphere& sphere) {
+		const std::optional<Contact> contact = Collide(sphere, sphericalShellCap);
+		return contact ? std::optional<Contact>(ReverseContact(*contact)) : std::nullopt;
 	}
 
 	std::optional<Contact> Collide(const Sphere& sphere, const AABB& box) {
@@ -509,6 +732,22 @@ namespace LGF::Collision {
 
 	bool Intersects(const Sphere& first, const Sphere& second) {
 		return Collide(first, second).has_value();
+	}
+
+	bool Intersects(const Sphere& sphere, const SphericalCap& sphericalCap) {
+		return Collide(sphere, sphericalCap).has_value();
+	}
+
+	bool Intersects(const SphericalCap& sphericalCap, const Sphere& sphere) {
+		return Intersects(sphere, sphericalCap);
+	}
+
+	bool Intersects(const Sphere& sphere, const SphericalShellCap& sphericalShellCap) {
+		return Collide(sphere, sphericalShellCap).has_value();
+	}
+
+	bool Intersects(const SphericalShellCap& sphericalShellCap, const Sphere& sphere) {
+		return Intersects(sphere, sphericalShellCap);
 	}
 
 	bool Intersects(const Sphere& sphere, const AABB& box) {

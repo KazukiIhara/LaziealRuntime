@@ -92,7 +92,8 @@ if (result) {
 
 `LGF::Physics::ParticleWorld`は、CPU上で球形粒子の落下、粒子間衝突、
 静的コライダーとの衝突、摩擦、反発を計算する簡易物理シミュレーターです。
-静的コライダーには`Collision::Sphere`と`Collision::AABB`を使用できます。
+静的コライダーには`Collision::Sphere`、`Collision::SphericalCap`、
+`Collision::SphericalShellCap`、`Collision::AABB`を使用できます。
 
 ```cpp
 LGF::Physics::ParticleWorld particles({
@@ -122,3 +123,5 @@ particles.Step(static_cast<float>(LGF::System::DeltaTime()));
 
 粒子の中心が`ParticleWorldSettings::worldBounds`を越えると、
 その粒子はワールドから自動的に削除されます。
+
+アルゴリズムと内部実装については、[ParticleWorld実装解説](Docs/ParticleWorld.md)を参照してください。
