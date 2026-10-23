@@ -8,6 +8,9 @@
 #include <limits>
 
 #include "CollisionUtility.h"
+#include "LGF/Math/Functions/MatrixMath.h"
+#include "LGF/Math/Functions/QuaternionMath.h"
+#include "LGF/Math/Functions/TransformMath.h"
 #include "LGF/Math/Functions/VectorMath.h"
 #include "LGF/Math/MathConstants.h"
 
@@ -25,6 +28,91 @@ namespace {
 			.normal = Reverse(contact.normal),
 			.penetrationDepth = contact.penetrationDepth,
 		};
+	}
+
+	using OBBAxes = std::array<Vector3, 3>;
+
+	OBBAxes GetAxes(const LGF::Collision::OBB& box) {
+		const Matrix4x4 rotation = Math::MakeRotateMatrix(
+			Math::Normalize(box.rotation));
+		return {
+			Math::TransformNormal({ 1.0f, 0.0f, 0.0f }, rotation),
+			Math::TransformNormal({ 0.0f, 1.0f, 0.0f }, rotation),
+			Math::TransformNormal({ 0.0f, 0.0f, 1.0f }, rotation),
+		};
+	}
+
+	Vector3 ToLocalDirection(const Vector3& direction, const OBBAxes& axes) {
+		return {
+			Math::Dot(direction, axes[0]),
+			Math::Dot(direction, axes[1]),
+			Math::Dot(direction, axes[2]),
+		};
+	}
+
+	Vector3 ToWorldDirection(const Vector3& direction, const OBBAxes& axes) {
+		return axes[0] * direction.x +
+			axes[1] * direction.y +
+			axes[2] * direction.z;
+	}
+
+	float CalculateProjectionRadius(
+		const LGF::Collision::OBB& box,
+		const OBBAxes& axes,
+		const Vector3& axis) {
+		return box.halfExtents.x * std::abs(Math::Dot(axes[0], axis)) +
+			box.halfExtents.y * std::abs(Math::Dot(axes[1], axis)) +
+			box.halfExtents.z * std::abs(Math::Dot(axes[2], axis));
+	}
+
+	bool TestSeparatingAxis(
+		const LGF::Collision::OBB& first,
+		const OBBAxes& firstAxes,
+		const LGF::Collision::OBB& second,
+		const OBBAxes& secondAxes,
+		const Vector3& centerOffset,
+		const Vector3& candidateAxis,
+		float& minimumPenetration,
+		Vector3& contactNormal) {
+		const float axisLengthSq = Math::LengthSq(candidateAxis);
+		if (axisLengthSq <= Math::EPSILON * Math::EPSILON) {
+			// 平行な辺同士の外積は軸として使えないため無視する。
+			return true;
+		}
+
+		const Vector3 axis = candidateAxis / std::sqrt(axisLengthSq);
+		const float firstRadius = CalculateProjectionRadius(first, firstAxes, axis);
+		const float secondRadius = CalculateProjectionRadius(second, secondAxes, axis);
+		const float signedDistance = Math::Dot(centerOffset, axis);
+		const float penetration =
+			firstRadius + secondRadius - std::abs(signedDistance);
+		if (penetration < 0.0f) {
+			return false;
+		}
+
+		if (penetration < minimumPenetration) {
+			minimumPenetration = penetration;
+			contactNormal = signedDistance >= 0.0f ? axis : -axis;
+		}
+		return true;
+	}
+
+	Vector3 SupportPoint(
+		const LGF::Collision::OBB& box,
+		const OBBAxes& axes,
+		const Vector3& direction) {
+		Vector3 result = box.center;
+		for (std::size_t axisIndex = 0u; axisIndex < axes.size(); ++axisIndex) {
+			const float projection = Math::Dot(axes[axisIndex], direction);
+			if (std::abs(projection) <= Math::EPSILON) {
+				continue;
+			}
+			const float extent = axisIndex == 0u
+				? box.halfExtents.x
+				: axisIndex == 1u ? box.halfExtents.y : box.halfExtents.z;
+			result += axes[axisIndex] * (projection > 0.0f ? extent : -extent);
+		}
+		return result;
 	}
 
 	struct SphericalShellCapGeometry {
@@ -330,6 +418,13 @@ namespace LGF::Collision {
 			box.min.z <= box.max.z;
 	}
 
+	bool IsValid(const OBB& box) {
+		return box.halfExtents.x >= 0.0f &&
+			box.halfExtents.y >= 0.0f &&
+			box.halfExtents.z >= 0.0f &&
+			Math::LengthSq(box.rotation) > Math::EPSILON * Math::EPSILON;
+	}
+
 	bool IsValid(const Capsule& capsule) {
 		return capsule.radius >= 0.0f;
 	}
@@ -354,6 +449,21 @@ namespace LGF::Collision {
 			std::clamp(point.y, box.min.y, box.max.y),
 			std::clamp(point.z, box.min.z, box.max.z),
 		};
+	}
+
+	Vector3 ClosestPoint(const Vector3& point, const OBB& box) {
+		if (!IsValid(box)) {
+			return box.center;
+		}
+
+		const OBBAxes axes = GetAxes(box);
+		const Vector3 localPoint = ToLocalDirection(point - box.center, axes);
+		const Vector3 clampedPoint{
+			std::clamp(localPoint.x, -box.halfExtents.x, box.halfExtents.x),
+			std::clamp(localPoint.y, -box.halfExtents.y, box.halfExtents.y),
+			std::clamp(localPoint.z, -box.halfExtents.z, box.halfExtents.z),
+		};
+		return box.center + ToWorldDirection(clampedPoint, axes);
 	}
 
 	Vector3 ClosestPoint(const Vector3& point, const Capsule& capsule) {
@@ -394,6 +504,19 @@ namespace LGF::Collision {
 			point.x >= box.min.x && point.x <= box.max.x &&
 			point.y >= box.min.y && point.y <= box.max.y &&
 			point.z >= box.min.z && point.z <= box.max.z;
+	}
+
+	bool Contains(const OBB& box, const Vector3& point) {
+		if (!IsValid(box)) {
+			return false;
+		}
+
+		const Vector3 localPoint = ToLocalDirection(
+			point - box.center,
+			GetAxes(box));
+		return std::abs(localPoint.x) <= box.halfExtents.x &&
+			std::abs(localPoint.y) <= box.halfExtents.y &&
+			std::abs(localPoint.z) <= box.halfExtents.z;
 	}
 
 	bool Contains(const Capsule& capsule, const Vector3& point) {
@@ -584,6 +707,57 @@ namespace LGF::Collision {
 		return contact ? std::optional<Contact>(ReverseContact(*contact)) : std::nullopt;
 	}
 
+	std::optional<Contact> Collide(const Sphere& sphere, const OBB& box) {
+		if (!IsValid(sphere) || !IsValid(box)) {
+			return std::nullopt;
+		}
+
+		const OBBAxes axes = GetAxes(box);
+		const Vector3 closest = ClosestPoint(sphere.center, box);
+		const Vector3 delta = closest - sphere.center;
+		const float distanceSq = Math::LengthSq(delta);
+		if (distanceSq > sphere.radius * sphere.radius) {
+			return std::nullopt;
+		}
+
+		if (distanceSq > Math::EPSILON * Math::EPSILON) {
+			const float distance = std::sqrt(distanceSq);
+			return Contact{
+				.point = closest,
+				.normal = delta / distance,
+				.penetrationDepth = sphere.radius - distance,
+			};
+		}
+
+		// 球の中心が箱の内側にある場合は、最も近い面へ向かう方向を法線にする。
+		const Vector3 localCenter = ToLocalDirection(sphere.center - box.center, axes);
+		const float distances[6]{
+			localCenter.x + box.halfExtents.x,
+			box.halfExtents.x - localCenter.x,
+			localCenter.y + box.halfExtents.y,
+			box.halfExtents.y - localCenter.y,
+			localCenter.z + box.halfExtents.z,
+			box.halfExtents.z - localCenter.z,
+		};
+		const Vector3 normals[6]{
+			-axes[0], axes[0],
+			-axes[1], axes[1],
+			-axes[2], axes[2],
+		};
+		const auto nearest = std::min_element(std::begin(distances), std::end(distances));
+		const std::size_t index = static_cast<std::size_t>(nearest - std::begin(distances));
+		return Contact{
+			.point = sphere.center + normals[index] * *nearest,
+			.normal = normals[index],
+			.penetrationDepth = sphere.radius + *nearest,
+		};
+	}
+
+	std::optional<Contact> Collide(const OBB& box, const Sphere& sphere) {
+		const std::optional<Contact> contact = Collide(sphere, box);
+		return contact ? std::optional<Contact>(ReverseContact(*contact)) : std::nullopt;
+	}
+
 	std::optional<Contact> Collide(const AABB& first, const AABB& second) {
 		if (!IsValid(first) || !IsValid(second)) {
 			return std::nullopt;
@@ -621,6 +795,69 @@ namespace LGF::Collision {
 			},
 			.normal = normal,
 			.penetrationDepth = penetrationDepth,
+		};
+	}
+
+	std::optional<Contact> Collide(const OBB& first, const OBB& second) {
+		if (!IsValid(first) || !IsValid(second)) {
+			return std::nullopt;
+		}
+
+		const OBBAxes firstAxes = GetAxes(first);
+		const OBBAxes secondAxes = GetAxes(second);
+		const Vector3 centerOffset = second.center - first.center;
+		float minimumPenetration = std::numeric_limits<float>::infinity();
+		Vector3 contactNormal{};
+
+		// OBB同士は、両方の面法線6本と辺同士の外積9本の合計15軸を調べる。
+		for (const Vector3& axis : firstAxes) {
+			if (!TestSeparatingAxis(
+				first,
+				firstAxes,
+				second,
+				secondAxes,
+				centerOffset,
+				axis,
+				minimumPenetration,
+				contactNormal)) {
+				return std::nullopt;
+			}
+		}
+		for (const Vector3& axis : secondAxes) {
+			if (!TestSeparatingAxis(
+				first,
+				firstAxes,
+				second,
+				secondAxes,
+				centerOffset,
+				axis,
+				minimumPenetration,
+				contactNormal)) {
+				return std::nullopt;
+			}
+		}
+		for (const Vector3& firstAxis : firstAxes) {
+			for (const Vector3& secondAxis : secondAxes) {
+				if (!TestSeparatingAxis(
+					first,
+					firstAxes,
+					second,
+					secondAxes,
+					centerOffset,
+					Math::Cross(firstAxis, secondAxis),
+					minimumPenetration,
+					contactNormal)) {
+					return std::nullopt;
+				}
+			}
+		}
+
+		const Vector3 firstPoint = SupportPoint(first, firstAxes, contactNormal);
+		const Vector3 secondPoint = SupportPoint(second, secondAxes, -contactNormal);
+		return Contact{
+			.point = (firstPoint + secondPoint) * 0.5f,
+			.normal = contactNormal,
+			.penetrationDepth = minimumPenetration,
 		};
 	}
 
@@ -764,7 +1001,19 @@ namespace LGF::Collision {
 		return Intersects(sphere, box);
 	}
 
+	bool Intersects(const Sphere& sphere, const OBB& box) {
+		return Collide(sphere, box).has_value();
+	}
+
+	bool Intersects(const OBB& box, const Sphere& sphere) {
+		return Intersects(sphere, box);
+	}
+
 	bool Intersects(const AABB& first, const AABB& second) {
+		return Collide(first, second).has_value();
+	}
+
+	bool Intersects(const OBB& first, const OBB& second) {
 		return Collide(first, second).has_value();
 	}
 
@@ -884,6 +1133,36 @@ namespace LGF::Collision {
 			.point = ray.origin + direction * nearDistance,
 			.normal = nearNormal,
 			.distance = nearDistance,
+		};
+	}
+
+	std::optional<RaycastHit> Raycast(
+		const Ray& ray,
+		const OBB& box,
+		float maxDistance) {
+		if (!IsValid(ray) || !IsValid(box) || maxDistance < 0.0f) {
+			return std::nullopt;
+		}
+
+		const OBBAxes axes = GetAxes(box);
+		const Ray localRay{
+			.origin = ToLocalDirection(ray.origin - box.center, axes),
+			.direction = ToLocalDirection(Math::Normalize(ray.direction), axes),
+		};
+		const AABB localBox{
+			.min = -box.halfExtents,
+			.max = box.halfExtents,
+		};
+		const std::optional<RaycastHit> localHit =
+			Raycast(localRay, localBox, maxDistance);
+		if (!localHit) {
+			return std::nullopt;
+		}
+
+		return RaycastHit{
+			.point = box.center + ToWorldDirection(localHit->point, axes),
+			.normal = ToWorldDirection(localHit->normal, axes),
+			.distance = localHit->distance,
 		};
 	}
 

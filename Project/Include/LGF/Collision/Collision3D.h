@@ -28,17 +28,20 @@ namespace LGF::Collision {
 	bool IsValid(const SphericalCap& sphericalCap);
 	bool IsValid(const SphericalShellCap& sphericalShellCap);
 	bool IsValid(const AABB& box);
+	bool IsValid(const OBB& box);
 	bool IsValid(const Capsule& capsule);
 	bool IsValid(const Cylinder& cylinder);
 	bool IsValid(const Ray& ray);
 	bool IsValid(const Plane& plane);
 
 	Vector3 ClosestPoint(const Vector3& point, const AABB& box);
+	Vector3 ClosestPoint(const Vector3& point, const OBB& box);
 	Vector3 ClosestPoint(const Vector3& point, const Capsule& capsule);
 
 	bool Contains(const Sphere& sphere, const Vector3& point);
 	bool Contains(const SphericalShellCap& sphericalShellCap, const Vector3& point);
 	bool Contains(const AABB& box, const Vector3& point);
+	bool Contains(const OBB& box, const Vector3& point);
 	bool Contains(const Capsule& capsule, const Vector3& point);
 	bool Contains(const Cylinder& cylinder, const Vector3& point);
 
@@ -49,7 +52,10 @@ namespace LGF::Collision {
 	std::optional<Contact> Collide(const SphericalShellCap& sphericalShellCap, const Sphere& sphere);
 	std::optional<Contact> Collide(const Sphere& sphere, const AABB& box);
 	std::optional<Contact> Collide(const AABB& box, const Sphere& sphere);
+	std::optional<Contact> Collide(const Sphere& sphere, const OBB& box);
+	std::optional<Contact> Collide(const OBB& box, const Sphere& sphere);
 	std::optional<Contact> Collide(const AABB& first, const AABB& second);
+	std::optional<Contact> Collide(const OBB& first, const OBB& second);
 	std::optional<Contact> Collide(const Capsule& capsule, const Sphere& sphere);
 	std::optional<Contact> Collide(const Sphere& sphere, const Capsule& capsule);
 	std::optional<Contact> Collide(const Capsule& capsule, const AABB& box);
@@ -63,7 +69,10 @@ namespace LGF::Collision {
 	bool Intersects(const SphericalShellCap& sphericalShellCap, const Sphere& sphere);
 	bool Intersects(const Sphere& sphere, const AABB& box);
 	bool Intersects(const AABB& box, const Sphere& sphere);
+	bool Intersects(const Sphere& sphere, const OBB& box);
+	bool Intersects(const OBB& box, const Sphere& sphere);
 	bool Intersects(const AABB& first, const AABB& second);
+	bool Intersects(const OBB& first, const OBB& second);
 	bool Intersects(const Capsule& capsule, const Sphere& sphere);
 	bool Intersects(const Sphere& sphere, const Capsule& capsule);
 	bool Intersects(const Capsule& capsule, const AABB& box);
@@ -77,6 +86,10 @@ namespace LGF::Collision {
 	std::optional<RaycastHit> Raycast(
 		const Ray& ray,
 		const AABB& box,
+		float maxDistance = std::numeric_limits<float>::infinity());
+	std::optional<RaycastHit> Raycast(
+		const Ray& ray,
+		const OBB& box,
 		float maxDistance = std::numeric_limits<float>::infinity());
 	std::optional<RaycastHit> Raycast(
 		const Ray& ray,

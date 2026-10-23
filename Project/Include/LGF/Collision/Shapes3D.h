@@ -1,5 +1,6 @@
 #pragma once
 
+#include "LGF/Math/Quaternion.h"
 #include "LGF/Math/Vector3.h"
 
 namespace LGF::Collision {
@@ -45,6 +46,16 @@ namespace LGF::Collision {
 	struct AABB {
 		Vector3 min{ -0.5f, -0.5f, -0.5f };
 		Vector3 max{ 0.5f, 0.5f, 0.5f };
+	};
+
+	/// <summary>
+	/// 中心、各ローカル軸方向の半径、回転で表す有向境界ボックス。
+	/// rotationは単位クォータニオンでなくてもよい。
+	/// </summary>
+	struct OBB {
+		Vector3 center{};
+		Vector3 halfExtents{ 0.5f, 0.5f, 0.5f };
+		Quaternion rotation{};
 	};
 
 	/// <summary>
