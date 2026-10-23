@@ -174,7 +174,7 @@ namespace LGF::Physics {
 
 		void Clear();
 		/// <summary>衝突解決を行い、指定時間だけシミュレーションを進める</summary>
-		void Step(float deltaTime);
+		void Update(float deltaTime);
 
 	private:
 		struct ParticlePair {

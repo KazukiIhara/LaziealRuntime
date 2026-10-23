@@ -85,7 +85,7 @@ namespace {
 	bool IsColliderShapeValid(const LGF::Physics::StaticColliderShape& shape) {
 		return std::visit([](const auto& colliderShape) {
 			return Collision::IsValid(colliderShape);
-		}, shape);
+			}, shape);
 	}
 
 	Vector3 Lerp(const Vector3& start, const Vector3& end, float t) {
@@ -118,7 +118,7 @@ namespace {
 			};
 			return Collision::IsValid(interpolatedCap)
 				? StaticColliderShape{ interpolatedCap }
-				: current;
+			: current;
 		}
 		if (const auto* currentShell = std::get_if<Collision::SphericalShellCap>(&current)) {
 			const auto& previousShell = std::get<Collision::SphericalShellCap>(previous);
@@ -131,7 +131,7 @@ namespace {
 			};
 			return Collision::IsValid(interpolatedShell)
 				? StaticColliderShape{ interpolatedShell }
-				: current;
+			: current;
 		}
 
 		const auto& previousBox = std::get<Collision::AABB>(previous);
@@ -155,7 +155,7 @@ namespace {
 			} else {
 				return (collider.min + collider.max) * 0.5f;
 			}
-		}, shape);
+			}, shape);
 	}
 
 	Vector3 CalculateColliderLinearVelocity(
@@ -521,7 +521,7 @@ namespace LGF::Physics {
 				.collisionParameter = particle.collisionParameter,
 				.enabled = particle.isEnabled,
 				.userData = particle.userData,
-			});
+				});
 		}
 	}
 
@@ -764,18 +764,18 @@ namespace LGF::Physics {
 			const Vector3& surfaceVelocity,
 			const CollisionParameter& particleParameter,
 			const CollisionParameter& colliderParameter) {
-			ContactAccumulator& contact = contacts[particleIndex];
-			contact.normal += normal;
-			contact.surfaceVelocity += surfaceVelocity;
-			contact.restitution = std::max(
-				contact.restitution,
-				std::max(particleParameter.restitution, colliderParameter.restitution));
-			contact.friction = std::max(
-				contact.friction,
-				std::sqrt(particleParameter.friction * colliderParameter.friction));
-			++contact.contactCount;
-			contact.hasCollision = true;
-		};
+				ContactAccumulator& contact = contacts[particleIndex];
+				contact.normal += normal;
+				contact.surfaceVelocity += surfaceVelocity;
+				contact.restitution = std::max(
+					contact.restitution,
+					std::max(particleParameter.restitution, colliderParameter.restitution));
+				contact.friction = std::max(
+					contact.friction,
+					std::sqrt(particleParameter.friction * colliderParameter.friction));
+				++contact.contactCount;
+				contact.hasCollision = true;
+			};
 
 		for (uint32_t iteration = 0u;
 			iteration < settings_.solverIterationCount;
@@ -802,7 +802,7 @@ namespace LGF::Physics {
 					? Vector3{ 1.0f, 0.0f, 0.0f }
 					: ((firstIndex + secondIndex) % 3u == 1u
 						? Vector3{ 0.0f, 1.0f, 0.0f }
-						: Vector3{ 0.0f, 0.0f, 1.0f });
+				: Vector3{ 0.0f, 0.0f, 1.0f });
 				const Vector3 normal = Collision::Internal::SafeNormal(delta, fallback);
 				const float distance = std::sqrt(std::max(distanceSq, 0.0f));
 				const float effectivePenetration = std::max(
@@ -862,7 +862,7 @@ namespace LGF::Physics {
 							colliderVelocities[colliderIndex],
 							particle.collisionParameter,
 							collider.options.collisionParameter);
-					}, colliderShapes[colliderIndex]);
+						}, colliderShapes[colliderIndex]);
 				}
 			}
 		}
@@ -985,11 +985,11 @@ namespace LGF::Physics {
 		}
 	}
 
-	void ParticleWorld::Step(float deltaTime) {
+	void ParticleWorld::Update(float deltaTime) {
 		using StepClock = std::chrono::steady_clock;
 		const auto toMilliseconds = [](StepClock::duration duration) {
 			return std::chrono::duration<double, std::milli>(duration).count();
-		};
+			};
 
 		lastStepStatistics_ = {};
 		// 0以下や非数の経過時間では、安全のためシミュレーションを進めない。
