@@ -182,6 +182,46 @@ namespace LGF::Physics {
 		staticObjectCount_ = 0u;
 	}
 
+	bool PhysicsWorld::IsValid(StaticObjectHandle handle) const {
+		return FindStaticObject(handle) != nullptr;
+	}
+
+	std::size_t PhysicsWorld::GetStaticObjectCount() const {
+		return staticObjectCount_;
+	}
+
+	std::optional<StaticObjectState> PhysicsWorld::GetState(
+		StaticObjectHandle handle) const {
+		const StaticObjectSlot* object = FindStaticObject(handle);
+		if (!object) {
+			return std::nullopt;
+		}
+		return StaticObjectState{
+			.handle = handle,
+			.shape = object->shape,
+			.enabled = object->isEnabled,
+			.userData = object->userData,
+		};
+	}
+
+	void PhysicsWorld::GetStaticObjectStates(
+		std::vector<StaticObjectState>& states) const {
+		states.clear();
+		states.reserve(staticObjectCount_);
+		for (uint32_t index = 0u; index < staticObjects_.size(); ++index) {
+			const StaticObjectSlot& object = staticObjects_[index];
+			if (!object.isOccupied) {
+				continue;
+			}
+			states.push_back({
+				.handle = { index, object.generation },
+				.shape = object.shape,
+				.enabled = object.isEnabled,
+				.userData = object.userData,
+			});
+		}
+	}
+
 	DynamicObjectHandle PhysicsWorld::AddDynamicObject(
 		const DynamicObjectDesc& desc) {
 		if (!IsShapeValid(desc.shape) || !IsFinite(desc.velocity)) {
@@ -246,34 +286,12 @@ namespace LGF::Physics {
 		dynamicObjectCount_ = 0u;
 	}
 
-	bool PhysicsWorld::IsValid(StaticObjectHandle handle) const {
-		return FindStaticObject(handle) != nullptr;
-	}
-
 	bool PhysicsWorld::IsValid(DynamicObjectHandle handle) const {
 		return FindDynamicObject(handle) != nullptr;
 	}
 
-	std::size_t PhysicsWorld::GetStaticObjectCount() const {
-		return staticObjectCount_;
-	}
-
 	std::size_t PhysicsWorld::GetDynamicObjectCount() const {
 		return dynamicObjectCount_;
-	}
-
-	std::optional<StaticObjectState> PhysicsWorld::GetState(
-		StaticObjectHandle handle) const {
-		const StaticObjectSlot* object = FindStaticObject(handle);
-		if (!object) {
-			return std::nullopt;
-		}
-		return StaticObjectState{
-			.handle = handle,
-			.shape = object->shape,
-			.enabled = object->isEnabled,
-			.userData = object->userData,
-		};
 	}
 
 	std::optional<DynamicObjectState> PhysicsWorld::GetState(
@@ -289,24 +307,6 @@ namespace LGF::Physics {
 			.enabled = object->isEnabled,
 			.userData = object->userData,
 		};
-	}
-
-	void PhysicsWorld::GetStaticObjectStates(
-		std::vector<StaticObjectState>& states) const {
-		states.clear();
-		states.reserve(staticObjectCount_);
-		for (uint32_t index = 0u; index < staticObjects_.size(); ++index) {
-			const StaticObjectSlot& object = staticObjects_[index];
-			if (!object.isOccupied) {
-				continue;
-			}
-			states.push_back({
-				.handle = { index, object.generation },
-				.shape = object.shape,
-				.enabled = object.isEnabled,
-				.userData = object.userData,
-			});
-		}
 	}
 
 	void PhysicsWorld::GetDynamicObjectStates(
@@ -386,6 +386,17 @@ namespace LGF::Physics {
 			: nullptr;
 	}
 
+	void PhysicsWorld::RemoveStaticObjectAt(uint32_t index) {
+		StaticObjectSlot& object = staticObjects_[index];
+		if (!object.isOccupied) {
+			return;
+		}
+		object.isOccupied = false;
+		object.generation = Internal::NextGeneration(object.generation);
+		freeStaticObjectIndices_.push_back(index);
+		--staticObjectCount_;
+	}
+
 	PhysicsWorld::DynamicObjectSlot* PhysicsWorld::FindDynamicObject(
 		DynamicObjectHandle handle) {
 		if (!handle.IsValid() || handle.index >= dynamicObjects_.size()) {
@@ -406,6 +417,17 @@ namespace LGF::Physics {
 		return object.isOccupied && object.generation == handle.generation
 			? &object
 			: nullptr;
+	}
+
+	void PhysicsWorld::RemoveDynamicObjectAt(uint32_t index) {
+		DynamicObjectSlot& object = dynamicObjects_[index];
+		if (!object.isOccupied) {
+			return;
+		}
+		object.isOccupied = false;
+		object.generation = Internal::NextGeneration(object.generation);
+		freeDynamicObjectIndices_.push_back(index);
+		--dynamicObjectCount_;
 	}
 
 	void PhysicsWorld::IntegrateDynamicObjects(float substepTime) {
@@ -465,28 +487,6 @@ namespace LGF::Physics {
 				RemoveDynamicObjectAt(index);
 			}
 		}
-	}
-
-	void PhysicsWorld::RemoveStaticObjectAt(uint32_t index) {
-		StaticObjectSlot& object = staticObjects_[index];
-		if (!object.isOccupied) {
-			return;
-		}
-		object.isOccupied = false;
-		object.generation = Internal::NextGeneration(object.generation);
-		freeStaticObjectIndices_.push_back(index);
-		--staticObjectCount_;
-	}
-
-	void PhysicsWorld::RemoveDynamicObjectAt(uint32_t index) {
-		DynamicObjectSlot& object = dynamicObjects_[index];
-		if (!object.isOccupied) {
-			return;
-		}
-		object.isOccupied = false;
-		object.generation = Internal::NextGeneration(object.generation);
-		freeDynamicObjectIndices_.push_back(index);
-		--dynamicObjectCount_;
 	}
 
 }

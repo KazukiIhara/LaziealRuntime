@@ -94,43 +94,6 @@ namespace LGF::Physics {
 	/// 初期実装では、静的OBBと動的Sphereの重力落下とめり込み解消を扱う。
 	/// </summary>
 	class PhysicsWorld {
-	public:
-		explicit PhysicsWorld(const PhysicsWorldSettings& settings = {});
-
-		StaticObjectHandle AddStaticObject(const StaticObjectDesc& desc);
-		StaticObjectHandle AddStaticObject(
-			const Collision::OBB& box,
-			bool enabled = true,
-			uint64_t userData = 0u);
-		bool RemoveStaticObject(StaticObjectHandle handle);
-		void ClearStaticObjects();
-
-		DynamicObjectHandle AddDynamicObject(const DynamicObjectDesc& desc);
-		DynamicObjectHandle AddDynamicObject(
-			const Collision::Sphere& sphere,
-			const Vector3& velocity = {},
-			bool enabled = true,
-			uint64_t userData = 0u);
-		bool RemoveDynamicObject(DynamicObjectHandle handle);
-		void ClearDynamicObjects();
-
-		bool IsValid(StaticObjectHandle handle) const;
-		bool IsValid(DynamicObjectHandle handle) const;
-		std::size_t GetStaticObjectCount() const;
-		std::size_t GetDynamicObjectCount() const;
-
-		std::optional<StaticObjectState> GetState(StaticObjectHandle handle) const;
-		std::optional<DynamicObjectState> GetState(DynamicObjectHandle handle) const;
-		void GetStaticObjectStates(std::vector<StaticObjectState>& states) const;
-		void GetDynamicObjectStates(std::vector<DynamicObjectState>& states) const;
-
-		void SetSettings(const PhysicsWorldSettings& settings);
-		const PhysicsWorldSettings& GetSettings() const;
-
-		void Clear();
-		/// <summary>指定時間だけ動的オブジェクトのシミュレーションを進める</summary>
-		void Update(float deltaTime);
-
 	private:
 		struct StaticObjectSlot {
 			StaticObjectShape shape{};
@@ -149,24 +112,55 @@ namespace LGF::Physics {
 			bool isOccupied{};
 		};
 
+	public:
+		explicit PhysicsWorld(const PhysicsWorldSettings& settings = {});
 
+		StaticObjectHandle AddStaticObject(const StaticObjectDesc& desc);
+		StaticObjectHandle AddStaticObject(const Collision::OBB& box, bool enabled = true, uint64_t userData = 0u);
+		bool RemoveStaticObject(StaticObjectHandle handle);
+		void ClearStaticObjects();
+		bool IsValid(StaticObjectHandle handle) const;
+		std::size_t GetStaticObjectCount() const;
+		std::optional<StaticObjectState> GetState(StaticObjectHandle handle) const;
+		void GetStaticObjectStates(std::vector<StaticObjectState>& states) const;
+
+		DynamicObjectHandle AddDynamicObject(const DynamicObjectDesc& desc);
+		DynamicObjectHandle AddDynamicObject(const Collision::Sphere& sphere, const Vector3& velocity = {}, bool enabled = true, uint64_t userData = 0u);
+		bool RemoveDynamicObject(DynamicObjectHandle handle);
+		void ClearDynamicObjects();
+		bool IsValid(DynamicObjectHandle handle) const;
+		std::size_t GetDynamicObjectCount() const;
+		std::optional<DynamicObjectState> GetState(DynamicObjectHandle handle) const;
+		void GetDynamicObjectStates(std::vector<DynamicObjectState>& states) const;
+
+		void SetSettings(const PhysicsWorldSettings& settings);
+		const PhysicsWorldSettings& GetSettings() const;
+
+		void Clear();
+		/// <summary>指定時間だけ動的オブジェクトのシミュレーションを進める</summary>
+		void Update(float deltaTime);
+
+	private:
 		StaticObjectSlot* FindStaticObject(StaticObjectHandle handle);
 		const StaticObjectSlot* FindStaticObject(StaticObjectHandle handle) const;
+		void RemoveStaticObjectAt(uint32_t index);
+
 		DynamicObjectSlot* FindDynamicObject(DynamicObjectHandle handle);
 		const DynamicObjectSlot* FindDynamicObject(DynamicObjectHandle handle) const;
+		void RemoveDynamicObjectAt(uint32_t index);
 
 		void IntegrateDynamicObjects(float substepTime);
 		void SolveStaticContacts();
 		void CleanupDynamicObjects();
-		void RemoveStaticObjectAt(uint32_t index);
-		void RemoveDynamicObjectAt(uint32_t index);
 
+	private:
 		PhysicsWorldSettings settings_{};
 		std::vector<StaticObjectSlot> staticObjects_;
 		std::vector<uint32_t> freeStaticObjectIndices_;
+		std::size_t staticObjectCount_{};
+
 		std::vector<DynamicObjectSlot> dynamicObjects_;
 		std::vector<uint32_t> freeDynamicObjectIndices_;
-		std::size_t staticObjectCount_{};
 		std::size_t dynamicObjectCount_{};
 	};
 
