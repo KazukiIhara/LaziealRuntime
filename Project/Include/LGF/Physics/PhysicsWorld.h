@@ -11,52 +11,48 @@
 
 namespace LGF::Physics {
 
-	/// <summary>登録された静的オブジェクトを識別するハンドル</summary>
+	// 登録された静的オブジェクトを識別するハンドル
 	struct StaticObjectHandle {
 		static constexpr uint32_t InvalidIndex = std::numeric_limits<uint32_t>::max();
 
 		uint32_t index = InvalidIndex;
 		uint32_t generation{};
 
-		/// <summary>ハンドルが有効な値を持っているか調べる</summary>
+		// ハンドルが有効な値を持っているか調べる
 		bool IsValid() const;
-		/// <summary>2つのハンドルが同じオブジェクトを指しているか比較する</summary>
+		// 2つのハンドルが同じオブジェクトを指しているか比較する
 		bool operator==(const StaticObjectHandle&) const = default;
 	};
 
-	/// <summary>登録された動的オブジェクトを識別するハンドル</summary>
+	// 登録された動的オブジェクトを識別するハンドル
 	struct DynamicObjectHandle {
 		static constexpr uint32_t InvalidIndex = std::numeric_limits<uint32_t>::max();
 
 		uint32_t index = InvalidIndex;
 		uint32_t generation{};
 
-		/// <summary>ハンドルが有効な値を持っているか調べる</summary>
+		// ハンドルが有効な値を持っているか調べる
 		bool IsValid() const;
-		/// <summary>2つのハンドルが同じオブジェクトを指しているか比較する</summary>
+		// 2つのハンドルが同じオブジェクトを指しているか比較する
 		bool operator==(const DynamicObjectHandle&) const = default;
 	};
 
-	/// <summary>
-	/// 静的オブジェクトが持てる形状。
-	/// 初期実装ではOBBのみを扱い、形状を増やす際はvariantへ型を追加する。
-	/// </summary>
+	// 静的オブジェクトが持てる形状。
+	// 初期実装ではOBBのみを扱い、形状を増やす際はvariantへ型を追加する。
 	using StaticObjectShape = std::variant<Collision::OBB>;
 
-	/// <summary>
-	/// 動的オブジェクトが持てる形状。
-	/// 初期実装ではSphereのみを扱い、形状を増やす際はvariantへ型を追加する。
-	/// </summary>
+	// 動的オブジェクトが持てる形状。
+	// 初期実装ではSphereのみを扱い、形状を増やす際はvariantへ型を追加する。
 	using DynamicObjectShape = std::variant<Collision::Sphere>;
 
-	/// <summary>静的オブジェクトの登録パラメータ</summary>
+	// 静的オブジェクトの登録パラメータ
 	struct StaticObjectDesc {
 		StaticObjectShape shape{};
 		bool enabled = true;
 		uint64_t userData{};
 	};
 
-	/// <summary>動的オブジェクトの登録パラメータ</summary>
+	// 動的オブジェクトの登録パラメータ
 	struct DynamicObjectDesc {
 		DynamicObjectShape shape{};
 		Vector3 velocity{};
@@ -64,7 +60,7 @@ namespace LGF::Physics {
 		uint64_t userData{};
 	};
 
-	/// <summary>登録されている静的オブジェクトの状態</summary>
+	// 登録されている静的オブジェクトの状態
 	struct StaticObjectState {
 		StaticObjectHandle handle{};
 		StaticObjectShape shape{};
@@ -72,7 +68,7 @@ namespace LGF::Physics {
 		uint64_t userData{};
 	};
 
-	/// <summary>登録されている動的オブジェクトの状態</summary>
+	// 登録されている動的オブジェクトの状態
 	struct DynamicObjectState {
 		DynamicObjectHandle handle{};
 		DynamicObjectShape shape{};
@@ -81,7 +77,7 @@ namespace LGF::Physics {
 		uint64_t userData{};
 	};
 
-	/// <summary>PhysicsWorldのシミュレーション設定</summary>
+	// PhysicsWorldのシミュレーション設定
 	struct PhysicsWorldSettings {
 		Vector3 gravity{ 0.0f, -9.8f, 0.0f };
 		Collision::AABB worldBounds{
@@ -93,10 +89,7 @@ namespace LGF::Physics {
 		float maximumDeltaTime = 1.0f / 15.0f;
 	};
 
-	/// <summary>
-	/// 静的オブジェクトと動的オブジェクトを管理する物理ワールド。
-	/// 初期実装では、静的OBBと動的Sphereの重力落下とめり込み解消を扱う。
-	/// </summary>
+	// 静的オブジェクトと動的オブジェクトを管理する物理ワールド。
 	class PhysicsWorld {
 	private:
 		struct StaticObjectSlot {
@@ -117,32 +110,33 @@ namespace LGF::Physics {
 		};
 
 	public:
-		/// <summary>指定された設定で物理ワールドを作成する</summary>
+		// 指定された設定で物理ワールドを作成する
 		explicit PhysicsWorld(const PhysicsWorldSettings& settings = {});
 
-		/// <summary>静的オブジェクトをワールドへ追加する</summary>
+		// 静的オブジェクトをワールドへ追加する
 		StaticObjectHandle AddStaticObject(const StaticObjectDesc& desc);
-		/// <summary>OBBを静的オブジェクトとしてワールドへ追加する</summary>
+		// OBBを静的オブジェクトとしてワールドへ追加する
 		StaticObjectHandle AddStaticObject(const Collision::OBB& box, bool enabled = true, uint64_t userData = 0u);
-		/// <summary>指定された静的オブジェクトをワールドから削除する</summary>
+		// 指定された静的オブジェクトをワールドから削除する
 		bool RemoveStaticObject(StaticObjectHandle handle);
-		/// <summary>すべての静的オブジェクトをワールドから削除する</summary>
+		// すべての静的オブジェクトをワールドから削除する
 		void ClearStaticObjects();
-		/// <summary>静的オブジェクトのハンドルが現在も有効か調べる</summary>
+		// 静的オブジェクトのハンドルが現在も有効か調べる
 		bool IsValid(StaticObjectHandle handle) const;
 		std::size_t GetStaticObjectCount() const;
 		std::optional<StaticObjectState> GetState(StaticObjectHandle handle) const;
 		void GetStaticObjectStates(std::vector<StaticObjectState>& states) const;
 
-		/// <summary>動的オブジェクトをワールドへ追加する</summary>
+		// 動的オブジェクトをワールドへ追加する
 		DynamicObjectHandle AddDynamicObject(const DynamicObjectDesc& desc);
-		/// <summary>Sphereを動的オブジェクトとしてワールドへ追加する</summary>
+		// Sphereを動的オブジェクトとしてワールドへ追加する
 		DynamicObjectHandle AddDynamicObject(const Collision::Sphere& sphere, const Vector3& velocity = {}, bool enabled = true, uint64_t userData = 0u);
-		/// <summary>指定された動的オブジェクトをワールドから削除する</summary>
+		bool SetVelocity(DynamicObjectHandle handle, const Vector3& velocity);
+		// 指定された動的オブジェクトをワールドから削除する
 		bool RemoveDynamicObject(DynamicObjectHandle handle);
-		/// <summary>すべての動的オブジェクトをワールドから削除する</summary>
+		// すべての動的オブジェクトをワールドから削除する
 		void ClearDynamicObjects();
-		/// <summary>動的オブジェクトのハンドルが現在も有効か調べる</summary>
+		// 動的オブジェクトのハンドルが現在も有効か調べる
 		bool IsValid(DynamicObjectHandle handle) const;
 		std::size_t GetDynamicObjectCount() const;
 		std::optional<DynamicObjectState> GetState(DynamicObjectHandle handle) const;
@@ -151,31 +145,31 @@ namespace LGF::Physics {
 		void SetSettings(const PhysicsWorldSettings& settings);
 		const PhysicsWorldSettings& GetSettings() const;
 
-		/// <summary>ワールドに登録されたすべてのオブジェクトを削除する</summary>
+		// ワールドに登録されたすべてのオブジェクトを削除する
 		void Clear();
-		/// <summary>指定時間だけ動的オブジェクトのシミュレーションを進める</summary>
+		// 指定時間だけ動的オブジェクトのシミュレーションを進める
 		void Update(float deltaTime);
 
 	private:
-		/// <summary>ハンドルに対応する静的オブジェクトの格納領域を探す</summary>
+		// ハンドルに対応する静的オブジェクトの格納領域を探す
 		StaticObjectSlot* FindStaticObject(StaticObjectHandle handle);
-		/// <summary>ハンドルに対応する読み取り専用の静的オブジェクト格納領域を探す</summary>
+		// ハンドルに対応する読み取り専用の静的オブジェクト格納領域を探す
 		const StaticObjectSlot* FindStaticObject(StaticObjectHandle handle) const;
-		/// <summary>指定インデックスの静的オブジェクトを削除して格納領域を再利用可能にする</summary>
+		// 指定インデックスの静的オブジェクトを削除して格納領域を再利用可能にする
 		void RemoveStaticObjectAt(uint32_t index);
 
-		/// <summary>ハンドルに対応する動的オブジェクトの格納領域を探す</summary>
+		// ハンドルに対応する動的オブジェクトの格納領域を探す
 		DynamicObjectSlot* FindDynamicObject(DynamicObjectHandle handle);
-		/// <summary>ハンドルに対応する読み取り専用の動的オブジェクト格納領域を探す</summary>
+		// ハンドルに対応する読み取り専用の動的オブジェクト格納領域を探す
 		const DynamicObjectSlot* FindDynamicObject(DynamicObjectHandle handle) const;
-		/// <summary>指定インデックスの動的オブジェクトを削除して格納領域を再利用可能にする</summary>
+		// 指定インデックスの動的オブジェクトを削除して格納領域を再利用可能にする
 		void RemoveDynamicObjectAt(uint32_t index);
 
-		/// <summary>重力と速度から動的オブジェクトの位置を更新する</summary>
+		// 重力と速度から動的オブジェクトの位置を更新する
 		void IntegrateDynamicObjects(float substepTime);
-		/// <summary>動的オブジェクトと静的オブジェクトのめり込みを解消する</summary>
+		// 動的オブジェクトと静的オブジェクトのめり込みを解消する
 		void SolveStaticContacts();
-		/// <summary>ワールド範囲外へ出た動的オブジェクトを削除する</summary>
+		// ワールド範囲外へ出た動的オブジェクトを削除する
 		void CleanupDynamicObjects();
 
 	private:

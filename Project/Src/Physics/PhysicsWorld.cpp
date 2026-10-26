@@ -264,6 +264,17 @@ namespace LGF::Physics {
 		});
 	}
 
+	bool PhysicsWorld::SetVelocity(
+		DynamicObjectHandle handle,
+		const Vector3& velocity) {
+		DynamicObjectSlot* object = FindDynamicObject(handle);
+		if (!object || !IsFinite(velocity)) {
+			return false;
+		}
+		object->velocity = velocity;
+		return true;
+	}
+
 	bool PhysicsWorld::RemoveDynamicObject(DynamicObjectHandle handle) {
 		if (!FindDynamicObject(handle)) {
 			return false;
