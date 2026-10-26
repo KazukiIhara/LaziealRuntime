@@ -5,21 +5,30 @@
 #include <cstddef>
 #include <cstdint>
 #include <limits>
-#include <map>
 #include <optional>
 #include <span>
+#include <string>
 #include <variant>
 #include <vector>
 
 namespace LGF::Collision {
 
-	using CollisionLayerMask = uint32_t;
-	inline constexpr CollisionLayerMask AllLayers =
-		std::numeric_limits<CollisionLayerMask>::max();
-
 	using ColliderShape = std::variant<Sphere, AABB, Capsule>;
+	using CollisionTag = std::string;
+	using CollisionTagList = std::vector<CollisionTag>;
 
-	/// <summary>登録されたコライダーを識別するハンドル</summary>
+	/// <summary>ユーザー側のオブジェクトを識別する世代付きハンドル</summary>
+	struct ObjectHandle {
+		static constexpr uint32_t InvalidIndex = std::numeric_limits<uint32_t>::max();
+
+		uint32_t index = InvalidIndex;
+		uint32_t generation{};
+
+		bool IsValid() const;
+		bool operator==(const ObjectHandle&) const = default;
+	};
+
+	/// <summary>登録されたコライダーを識別する世代付きハンドル</summary>
 	struct ColliderHandle {
 		static constexpr uint32_t InvalidIndex = std::numeric_limits<uint32_t>::max();
 
@@ -32,41 +41,94 @@ namespace LGF::Collision {
 
 	/// <summary>コライダーの登録パラメータ</summary>
 	struct ColliderOptions {
-		CollisionLayerMask layer = 1u;
-		CollisionLayerMask mask = AllLayers;
-		bool isTrigger = false;
+		CollisionTag tag = "Default";
+		/// <summary>衝突を検出し、イベントを受け取る相手のタグ</summary>
+		CollisionTagList targetTags;
+		ObjectHandle objectHandle{};
 		bool enabled = true;
-		uint64_t userData{};
 	};
 
-	/// <summary>衝突イベントの発生フェーズ</summary>
-	enum class CollisionPhase : uint8_t {
-		Enter,
-		Stay,
-		Exit,
+	/// <summary>登録されているコライダーの状態</summary>
+	struct ColliderState {
+		ColliderHandle handle{};
+		CollisionTag tag;
+		CollisionTagList targetTags;
+		ObjectHandle objectHandle{};
+		ColliderShape shape{};
+		bool enabled{};
 	};
 
-	/// <summary>コライダー間で発生した衝突イベント</summary>
-	struct CollisionEvent {
-		ColliderHandle first{};
-		ColliderHandle second{};
-		uint64_t firstUserData{};
-		uint64_t secondUserData{};
-		CollisionPhase phase = CollisionPhase::Enter;
+	/// <summary>
+	/// 自分と衝突した相手の情報。
+	/// contact.normal は自分から collider へ向かう向きになる。
+	/// </summary>
+	struct ColliderCollision {
+		ColliderHandle collider{};
+		CollisionTag tag;
+		ObjectHandle objectHandle{};
 		Contact contact{};
-		bool isTrigger{};
+	};
+
+	/// <summary>直前の更新で発生したコライダー単位の衝突イベント</summary>
+	struct ColliderEvents {
+		std::span<const ColliderCollision> enter;
+		std::span<const ColliderCollision> stay;
+		std::span<const ColliderCollision> exit;
 	};
 
 	/// <summary>ワールド内のコライダーに対するレイキャスト結果</summary>
 	struct WorldRaycastHit {
 		ColliderHandle collider{};
-		uint64_t userData{};
+		ObjectHandle objectHandle{};
 		RaycastHit hit{};
 	};
 
 	/// <summary>コライダーの登録、衝突イベント、レイキャストを管理する</summary>
 	class ColliderWorld {
+	private:
+		struct CollisionPair {
+			uint32_t firstIndex{};
+			uint32_t secondIndex{};
+			/// <summary>各コライダーが相手のタグを対象にしているか</summary>
+			bool notifyFirst{};
+			bool notifySecond{};
+		};
+
+		struct EventStorage {
+			std::vector<ColliderCollision> enter;
+			std::vector<ColliderCollision> stay;
+			std::vector<ColliderCollision> exit;
+
+			void Clear();
+		};
+
+		struct Slot {
+			ColliderShape shape{};
+			ObjectHandle objectHandle{};
+			std::vector<uint32_t> targetTagIndices;
+			std::vector<ColliderCollision> previousCollisions;
+			std::vector<ColliderCollision> currentCollisions;
+			EventStorage events;
+			uint32_t tagIndex = ColliderHandle::InvalidIndex;
+			uint32_t indexInTagGroup = ColliderHandle::InvalidIndex;
+			uint32_t generation = 1u;
+			bool isEnabled = true;
+			bool isOccupied{};
+		};
+
+		struct TagGroup {
+			std::vector<uint32_t> colliderIndices;
+		};
+
 	public:
+		ColliderWorld();
+
+		/// <summary>コライダーで使用するタグをワールドに登録する</summary>
+		bool RegisterTag(const CollisionTag& tag);
+		void RegisterTags(const CollisionTagList& tags);
+		bool HasTag(const CollisionTag& tag) const;
+		std::span<const CollisionTag> GetTags() const;
+
 		ColliderHandle Add(
 			const ColliderShape& shape,
 			const ColliderOptions& options = {});
@@ -81,6 +143,7 @@ namespace LGF::Collision {
 			const ColliderOptions& options = {});
 
 		bool Remove(ColliderHandle handle);
+		/// <summary>登録済みのタグを残して、すべてのコライダーを削除する</summary>
 		void Clear();
 
 		bool IsValid(ColliderHandle handle) const;
@@ -90,53 +153,57 @@ namespace LGF::Collision {
 		bool SetShape(ColliderHandle handle, const Sphere& sphere);
 		bool SetShape(ColliderHandle handle, const AABB& box);
 		bool SetShape(ColliderHandle handle, const Capsule& capsule);
+		bool SetTag(ColliderHandle handle, const CollisionTag& tag);
+		/// <summary>衝突イベントを受け取る相手のタグを設定する</summary>
+		bool SetTargetTags(
+			ColliderHandle handle,
+			const CollisionTagList& targetTags);
+		bool SetObjectHandle(
+			ColliderHandle handle,
+			ObjectHandle objectHandle);
 		bool SetEnabled(ColliderHandle handle, bool enabled);
-		bool SetLayer(ColliderHandle handle, CollisionLayerMask layer);
-		bool SetMask(ColliderHandle handle, CollisionLayerMask mask);
-		bool SetTrigger(ColliderHandle handle, bool isTrigger);
-		bool SetUserData(ColliderHandle handle, uint64_t userData);
 
-		const ColliderShape* GetShape(ColliderHandle handle) const;
-		std::optional<ColliderOptions> GetOptions(ColliderHandle handle) const;
+		std::optional<ColliderState> GetCollider(ColliderHandle handle) const;
 		bool IsColliding(ColliderHandle handle) const;
 
 		void Step();
-		std::span<const CollisionEvent> GetEvents() const;
+		ColliderEvents GetEvents(ColliderHandle handle) const;
 
+		/// <summary>
+		/// 指定したタグのうち最も近いコライダーへレイキャストする。
+		/// tags が空の場合は全タグを対象とする。
+		/// </summary>
 		std::optional<WorldRaycastHit> RaycastClosest(
 			const Ray& ray,
 			float maxDistance = std::numeric_limits<float>::infinity(),
-			CollisionLayerMask mask = AllLayers) const;
+			const CollisionTagList& tags = {}) const;
 
 	private:
-		struct Slot {
-			ColliderShape shape{};
-			ColliderOptions options{};
-			uint32_t generation = 1u;
-			bool isOccupied{};
-		};
-
-		struct PairKey {
-			ColliderHandle first{};
-			ColliderHandle second{};
-
-			bool operator<(const PairKey& other) const;
-		};
-
-		struct PairState {
-			Contact contact{};
-			uint64_t firstUserData{};
-			uint64_t secondUserData{};
-			bool isTrigger{};
-		};
 
 		Slot* FindSlot(ColliderHandle handle);
 		const Slot* FindSlot(ColliderHandle handle) const;
+		const ColliderCollision* FindCollision(
+			const std::vector<ColliderCollision>& collisions,
+			ColliderHandle collider) const;
+		std::optional<uint32_t> FindTagIndex(const CollisionTag& tag) const;
+		bool ResolveTargetTagIndices(
+			const CollisionTagList& targetTags,
+			std::vector<uint32_t>& targetTagIndices) const;
+		void AddToTagGroup(uint32_t colliderIndex, uint32_t tagIndex);
+		void RemoveFromTagGroup(uint32_t colliderIndex);
+		void BuildCollisionPairs();
+		void BuildEvents(Slot& slot);
+		bool RaycastTagsContain(
+			const CollisionTagList& tags,
+			const CollisionTag& tag) const;
+
+	private:
 
 		std::vector<Slot> slots_;
 		std::vector<uint32_t> freeIndices_;
-		std::map<PairKey, PairState> activePairs_;
-		std::vector<CollisionEvent> events_;
+		CollisionTagList tags_;
+		std::vector<TagGroup> tagGroups_;
+		std::vector<CollisionPair> collisionPairs_;
 		std::size_t colliderCount_{};
 	};
 
