@@ -450,6 +450,32 @@ namespace LGF::Physics {
 		return true;
 	}
 
+	bool PhysicsWorld::AddForce(DynamicObjectHandle handle, const Vector3& force) {
+		DynamicObjectSlot* object = FindDynamicObject(handle);
+		if (!object || !Internal::IsFinite(force)) {
+			return false;
+		}
+		const Vector3 accumulatedForce = object->force + force;
+		if (!Internal::IsFinite(accumulatedForce)) {
+			return false;
+		}
+		object->force = accumulatedForce;
+		return true;
+	}
+
+	bool PhysicsWorld::AddImpulse(DynamicObjectHandle handle, const Vector3& impulse) {
+		DynamicObjectSlot* object = FindDynamicObject(handle);
+		if (!object || !Internal::IsFinite(impulse)) {
+			return false;
+		}
+		const Vector3 velocity = object->velocity + impulse * object->inverseMass;
+		if (!Internal::IsFinite(velocity)) {
+			return false;
+		}
+		object->velocity = velocity;
+		return true;
+	}
+
 	bool PhysicsWorld::SetObjectHandle(DynamicObjectHandle handle, ObjectHandle objectHandle) {
 		DynamicObjectSlot* object = FindDynamicObject(handle);
 		if (!object) {
@@ -714,7 +740,8 @@ namespace LGF::Physics {
 			if (!object.isOccupied || !object.isEnabled) {
 				continue;
 			}
-			object.velocity += settings_.gravity * substepTime;
+			const Vector3 acceleration = settings_.gravity + object.force * object.inverseMass;
+			object.velocity += acceleration * substepTime;
 			MoveShape(object.shape, object.velocity * substepTime);
 		}
 	}
@@ -807,10 +834,11 @@ namespace LGF::Physics {
 
 	void PhysicsWorld::CleanupDynamicObjects() {
 		for (uint32_t index = 0u; index < dynamicObjects_.size(); ++index) {
-			const DynamicObjectSlot& object = dynamicObjects_[index];
+			DynamicObjectSlot& object = dynamicObjects_[index];
 			if (!object.isOccupied) {
 				continue;
 			}
+			object.force = {};
 			if (!Collision::Contains(settings_.worldBounds, GetPosition(object.shape))) {
 				RemoveDynamicObjectAt(index);
 			}

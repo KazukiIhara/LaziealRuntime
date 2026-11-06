@@ -213,6 +213,7 @@ namespace LGF::Physics {
 		struct DynamicObjectSlot {
 			DynamicObjectShape shape{};
 			Vector3 velocity{};
+			Vector3 force{};
 			float inverseMass = 1.0f;
 			PhysicsMaterial material{};
 			ObjectHandle objectHandle{};
@@ -320,6 +321,8 @@ namespace LGF::Physics {
 		DynamicObjectHandle AddDynamicObject(const Collision::Sphere& sphere, const Vector3& velocity = {}, bool enabled = true, ObjectHandle objectHandle = {});
 		bool SetVelocity(DynamicObjectHandle handle, const Vector3& velocity);
 		bool SetMass(DynamicObjectHandle handle, float mass);
+		bool AddForce(DynamicObjectHandle handle, const Vector3& force);
+		bool AddImpulse(DynamicObjectHandle handle, const Vector3& impulse);
 		bool SetObjectHandle(DynamicObjectHandle handle, ObjectHandle objectHandle);
 		bool RemoveDynamicObject(DynamicObjectHandle handle);
 		void ClearDynamicObjects();
