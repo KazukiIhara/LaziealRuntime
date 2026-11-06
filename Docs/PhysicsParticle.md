@@ -1,9 +1,9 @@
-# ParticleWorld 実装解説
+# PhysicsParticle 実装解説
 
 ## 1. この資料の目的
 
-`LGF::Physics::ParticleWorld`は、球形の物理粒子を扱う簡易的な3D物理シミュレーターです。
-この資料では、ParticleWorldを使用する方法だけでなく、内部でどのような計算を行っているかを説明します。
+`LGF::Physics::PhysicsWorld`は、球形の物理粒子を扱う簡易的な3D物理シミュレーターです。
+この資料では、PhysicsWorldのPhysicsParticle機能を使用する方法だけでなく、内部でどのような計算を行っているかを説明します。
 
 主な機能は次のとおりです。
 
@@ -17,13 +17,13 @@
 
 実装は次のファイルに分かれています。
 
-- 公開API: [`Project/Include/LGF/Physics/ParticleWorld.h`](../Project/Include/LGF/Physics/ParticleWorld.h)
-- 内部実装: [`Project/Src/Physics/ParticleWorld.cpp`](../Project/Src/Physics/ParticleWorld.cpp)
-- 確認シーン: [`ParticleWorldScene.cpp`](../../../Project/Src/Scene/ParticleWorldScene.cpp)
+- 公開API: [`Project/Include/LGF/Physics/PhysicsWorld.h`](../Project/Include/LGF/Physics/PhysicsWorld.h)
+- 内部実装: [`Project/Src/Physics/PhysicsParticle.cpp`](../Project/Src/Physics/PhysicsParticle.cpp)
+- 確認シーン: [`PhysicsParticleScene.cpp`](../../../Project/Src/Scene/PhysicsParticleScene.cpp)
 
-## 2. ParticleWorldの立ち位置
+## 2. PhysicsParticleの立ち位置
 
-ParticleWorldが扱う粒子は、それぞれが位置、速度、半径、質量を持つ球体です。
+PhysicsWorldが扱うPhysicsParticleは、それぞれが位置、速度、半径、質量を持つ球体です。
 煙や火花のように見た目だけを動かすパーティクルではなく、衝突して押し合う物理オブジェクトとして扱います。
 
 ただし、一般的な剛体物理エンジンをすべて再現したものではありません。
@@ -36,7 +36,7 @@ ParticleWorldが扱う粒子は、それぞれが位置、速度、半径、質�
 
 ## 3. 公開データの構成
 
-### 3.1 ParticleDesc
+### 3.1 PhysicsParticleDesc
 
 粒子を追加するときに指定する値です。
 
@@ -46,7 +46,7 @@ ParticleWorldが扱う粒子は、それぞれが位置、速度、半径、質�
 | `velocity` | 初速度 |
 | `radius` | Sphereコライダーの半径 |
 | `mass` | 質量。`0`の場合は固定粒子 |
-| `collisionParameter` | 反発係数と摩擦係数 |
+| `material` | 反発係数と摩擦係数 |
 | `enabled` | シミュレーションへ参加するか |
 | `userData` | ゲーム側が自由に使える識別値 |
 
@@ -59,10 +59,10 @@ inverseMass = 1 / mass
 質量が`0`の場合は逆質量も`0`になります。
 力や位置補正へ逆質量を掛けることで、固定粒子を特別な分岐の少ない形で扱えます。
 
-### 3.2 CollisionParameter
+### 3.2 PhysicsMaterial
 
 ```cpp
-struct CollisionParameter {
+struct PhysicsMaterial {
     float restitution = 0.1f;
     float friction = 0.4f;
 };
@@ -72,7 +72,7 @@ struct CollisionParameter {
 
 `friction`は摩擦係数です。`0`では接線方向の速度をほとんど失わず、`1`へ近づけるほど滑りにくくなります。
 
-ParticleWorldへ渡された値は`0`から`1`の範囲に収められます。
+PhysicsWorldへ渡された値は`0`から`1`の範囲に収められます。
 粒子とコライダーが接触したときは、次の方法で両者の値を合成します。
 
 ```text
@@ -83,7 +83,7 @@ ParticleWorldへ渡された値は`0`から`1`の範囲に収められます。
 反発には大きい方を使用するため、どちらか一方がよく跳ねる設定なら接触全体も跳ねやすくなります。
 摩擦には幾何平均を使用し、片方だけが極端な値でも変化が急になりすぎないようにしています。
 
-### 3.3 ParticleWorldSettings
+### 3.3 PhysicsWorldSettings
 
 | メンバー | 意味 |
 |---|---|
@@ -107,13 +107,13 @@ ParticleWorldへ渡された値は`0`から`1`の範囲に収められます。
 多数の粒子が積み重なったときの押し合いを安定させたい場合は、主に`solverIterationCount`を増やします。
 どちらも増やすほど処理負荷が上がります。
 
-### 3.4 ParticleWorldStepStatistics
+### 3.4 PhysicsParticleStepStatistics
 
-`GetLastStepStatistics()`から、直前に実行した`Step()`の処理時間と衝突候補数を取得できます。
+`GetLastParticleStepStatistics()`から、直前に実行した`Update()`の処理時間と衝突候補数を取得できます。
 
 | メンバー | 意味 |
 |---|---|
-| `totalMilliseconds` | `Step()`全体の処理時間 |
+| `totalMilliseconds` | `Update()`全体の処理時間 |
 | `integrationMilliseconds` | 重力と外力から速度、予測位置を更新した時間 |
 | `broadPhaseMilliseconds` | 空間ハッシュを構築して候補ペアを作成した時間 |
 | `positionSolveMilliseconds` | 粒子同士と静的コライダーのめり込みを解消した時間 |
@@ -122,9 +122,9 @@ ParticleWorldへ渡された値は`0`から`1`の範囲に収められます。
 | `candidatePairCount` | 全サブステップで生成した粒子ペア候補数の合計 |
 
 ```cpp
-world.Step(deltaTime);
+world.Update(deltaTime);
 
-const auto& statistics = world.GetLastStepStatistics();
+const auto& statistics = world.GetLastParticleStepStatistics();
 std::cout << statistics.totalMilliseconds << " ms\n";
 std::cout << statistics.candidatePairCount << " pairs\n";
 ```
@@ -132,16 +132,17 @@ std::cout << statistics.candidatePairCount << " pairs\n";
 各区間は個別に計測しているため、それらの合計と`totalMilliseconds`は完全には一致しません。
 コライダーの補間、作業配列の準備、計測自体の負荷などが全体時間にだけ含まれます。
 
-### 3.5 StaticCollider
+### 3.5 StaticObject
 
-ParticleWorldへ登録できる静的コライダーは、現在Sphere、SphericalCap、SphericalShellCap、AABBです。
+PhysicsWorldへ登録できる静的オブジェクトは、現在Sphere、SphericalCap、SphericalShellCap、AABB、OBBです。
 
 ```cpp
-using StaticColliderShape = std::variant<
+using StaticObjectShape = std::variant<
     Collision::Sphere,
     Collision::SphericalCap,
     Collision::SphericalShellCap,
-    Collision::AABB>;
+    Collision::AABB,
+    Collision::OBB>;
 ```
 
 `SphericalCap`は円形の境界を持つ、閉じていない球面です。
@@ -154,14 +155,14 @@ using StaticColliderShape = std::variant<
 `outerApex`、`axis`、`outerRadius`、`innerRadius`、`height`で形を指定します。
 
 静的コライダーは質量を持たず、粒子から押されても動きません。
-`StaticColliderOptions`によって、反発、摩擦、有効状態、ユーザーデータを設定できます。
+`StaticObjectOptions`によって、反発、摩擦、有効状態、ユーザーデータを設定できます。
 
 ## 4. 基本的な使い方
 
 次の例では、有限のシミュレーション範囲、床、球形の障害物、落下する粒子を作成しています。
 
 ```cpp
-LGF::Physics::ParticleWorld world({
+LGF::Physics::PhysicsWorld world({
     .gravity = { 0.0f, -9.8f, 0.0f },
     .worldBounds = {
         .min = { -20.0f, -10.0f, -20.0f },
@@ -171,42 +172,47 @@ LGF::Physics::ParticleWorld world({
     .solverIterationCount = 6,
 });
 
-world.AddCollider(
+world.AddStaticObject(
     LGF::Collision::AABB{
         .min = { -5.0f, -0.5f, -5.0f },
         .max = { 5.0f, 0.0f, 5.0f },
     },
-    LGF::Physics::StaticColliderOptions{
-        .collisionParameter = {
+    LGF::Physics::StaticObjectOptions{
+        .material = {
             .restitution = 0.1f,
             .friction = 0.8f,
         },
     });
 
-world.AddCollider(LGF::Collision::Sphere{
+world.AddStaticObject(LGF::Collision::Sphere{
     .center = { 0.0f, 1.0f, 0.0f },
     .radius = 1.0f,
 });
 
-const LGF::Physics::ParticleHandle particle = world.Add({
+const LGF::Physics::PhysicsParticleHandle particle = world.AddParticle({
     .position = { 0.0f, 5.0f, 0.0f },
     .velocity = {},
     .radius = 0.2f,
     .mass = 1.0f,
-    .collisionParameter = {
+    .material = {
         .restitution = 0.25f,
         .friction = 0.4f,
     },
 });
 
-world.Step(static_cast<float>(LGF::System::DeltaTime()));
+world.Update(static_cast<float>(LGF::System::DeltaTime()));
 ```
 
-描画時は`GetStates()`で有効な粒子の状態を取得します。
+生成後の粒子は、`SetParticlePosition()`、`SetParticleVelocity()`、
+`AddParticleForce()`、`AddParticleImpulse()`などを使って操作できます。
+これらの変更命令は内部キューへ登録され、次の`Update()`開始時に登録順で反映されます。
+粒子の可変参照やポインターは公開しないため、将来GPU用の命令バッファへ変換できます。
+
+描画時は`GetParticleStates()`で有効な粒子の状態を取得します。
 
 ```cpp
-std::vector<LGF::Physics::ParticleState> states;
-world.GetStates(states);
+std::vector<LGF::Physics::PhysicsParticleState> states;
+world.GetParticleStates(states);
 
 for (const auto& state : states) {
     LGF::Sphere3D(state.radius).Draw(
@@ -215,12 +221,12 @@ for (const auto& state : states) {
 }
 ```
 
-ParticleWorldは物理計算だけを担当し、描画オブジェクトを所有しません。
+PhysicsWorldは物理計算だけを担当し、描画オブジェクトを所有しません。
 この分離によって、同じ物理粒子を球、モデル、インスタンシングなど任意の方法で描画できます。
 
 ## 5. 1フレームの処理順
 
-`Step(deltaTime)`は、概ね次の順番で処理します。
+`Update(deltaTime)`は、概ね次の順番で処理します。
 
 ```mermaid
 flowchart TD
@@ -277,7 +283,7 @@ position += velocity × substepTime
 更新後の速度を使って位置を進めるため、これは半陰的オイラー法に近い計算です。
 明示的オイラー法よりも、重力やばねのような加速度を扱うときに安定しやすい特徴があります。
 
-`AddForce()`で追加した力は1回の`Step()`が終わるとクリアされます。
+`AddForce()`で追加した力は1回の`Update()`が終わるとクリアされます。
 継続して力を加えたい場合は毎フレーム呼び出します。
 
 ### 7.2 力積
@@ -293,7 +299,7 @@ velocity += impulse × inverseMass
 ## 8. 粒子同士の衝突候補を探す
 
 すべての粒子ペアを調べる単純な方法では、粒子数を`N`とすると最大でおよそ`N² / 2`回の判定が必要です。
-粒子が増えるほど急激に処理が重くなるため、ParticleWorldでは一様グリッドによる空間ハッシュを使っています。
+粒子が増えるほど急激に処理が重くなるため、PhysicsWorldでは一様グリッドによる空間ハッシュを使っています。
 
 ### 8.1 セルサイズ
 
@@ -432,7 +438,7 @@ R = (a² + h²) / (2h)
 その点が`apex`から`height`までの範囲にある場合だけ接触候補にします。
 これにより、円形境界より先にある開口部は衝突面になりません。
 
-ParticleWorldでは球冠の内側を有効領域として扱います。
+PhysicsWorldでは球冠の内側を有効領域として扱います。
 粒子の外周が元の球面を越えた量だけ、元の球の中心方向へ位置を戻します。
 描画用の`SphericalCap3D`も同じ`baseRadius`と`height`を使うため、
 両者へ同じ値を渡すと見た目と衝突面を一致させられます。
@@ -465,7 +471,7 @@ outerRadius - innerRadius < height <= outerRadius
 位置補正によって粒子を大きく動かし、その移動量をそのまま速度へ変換すると、深く埋まった粒子が異常な速度で吹き飛ぶ原因になります。
 例えば0.5mの補正を`1 / 480`秒のサブステップで速度へ変換すると、補正だけで240m/sになります。
 
-ParticleWorldでは、粒子同士と静的コライダーによって加えた位置補正を`positionCorrections`へ記録します。
+PhysicsWorldでは、粒子同士と静的コライダーによって加えた位置補正を`positionCorrections`へ記録します。
 速度を作り直すときは、この補正量を実際の移動量から除外します。
 
 ```text
@@ -491,7 +497,7 @@ velocity *= damping
 
 ## 12. 静的コライダーへの反発と摩擦
 
-`SetColliderShape()`で静的コライダーを移動した場合は、前回と現在の基準位置から線形速度を求めます。
+`SetStaticObjectShape()`で静的コライダーを移動した場合は、前回と現在の基準位置から線形速度を求めます。
 
 ```text
 surfaceVelocity =
@@ -575,7 +581,7 @@ tangentImpulseMagnitude = min(
 物理粒子は、床の外へ落ちても何もしなければ重力で落下し続けます。
 描画されなくなった粒子も計算対象として残るため、長時間のゲームでは不要な処理とメモリ使用が増えていきます。
 
-ParticleWorldでは`Step()`の最後に、粒子中心が`worldBounds`の内側にあるか確認します。
+PhysicsWorldでは`Update()`の最後に、粒子中心が`worldBounds`の内側にあるか確認します。
 
 ```cpp
 if (!Collision::Contains(settings.worldBounds, particle.position)) {
@@ -590,10 +596,10 @@ if (!Collision::Contains(settings.worldBounds, particle.position)) {
 
 ## 15. 世代番号付きハンドル
 
-ParticleWorldは粒子へのポインターを外部へ公開せず、`ParticleHandle`を返します。
+PhysicsWorldは粒子へのポインターを外部へ公開せず、`PhysicsParticleHandle`を返します。
 
 ```cpp
-struct ParticleHandle {
+struct PhysicsParticleHandle {
     uint32_t index;
     uint32_t generation;
 };
@@ -613,7 +619,7 @@ struct ParticleHandle {
 
 `worldBounds`によって自動削除された場合も同じ処理を通るため、以前のハンドルは`IsValid()`で無効になります。
 
-静的コライダーの`StaticColliderHandle`も同じ仕組みです。
+静的コライダーの`StaticObjectHandle`も同じ仕組みです。
 
 ## 16. パラメータ調整の目安
 
@@ -684,7 +690,7 @@ struct ParticleHandle {
 
 ## 18. 現在の制限
 
-ParticleWorldは学習しやすさと汎用的な土台を優先した簡易実装です。
+PhysicsWorldは学習しやすさと汎用的な土台を優先した簡易実装です。
 現在は次の機能を持っていません。
 
 - 連続衝突判定
@@ -698,8 +704,8 @@ ParticleWorldは学習しやすさと汎用的な土台を優先した簡易実�
 - 静的コライダー用の広域判定
 - 流体の圧力、密度、粘性、表面張力
 
-`SetColliderShape()`を使えば静的コライダーの位置や大きさは更新できます。
-ParticleWorldは前回と現在の形状を保存し、各サブステップで線形補間した形状を衝突判定に使います。
+`SetStaticObjectShape()`を使えば静的コライダーの位置や大きさは更新できます。
+PhysicsWorldは前回と現在の形状を保存し、各サブステップで線形補間した形状を衝突判定に使います。
 このため、1フレーム内で適度に移動するコライダーは、現在位置だけで判定する場合よりすり抜けにくくなります。
 平行移動については、前回と現在の基準位置から線形速度を計算し、反発と摩擦へ使用します。
 ただし、回転の補間、厳密な連続衝突判定、回転や変形による接触点ごとの表面速度計算は行っていません。
@@ -707,7 +713,7 @@ ParticleWorldは前回と現在の形状を保存し、各サブステップで�
 
 ## 19. 中華鍋へ発展させる場合
 
-今回のParticleWorldは、炒飯を構成する多数の粒を動かす基礎になります。
+今回のPhysicsWorldは、炒飯を構成する多数の粒を動かす基礎になります。
 中華鍋を振った動きを粒子へ正しく伝えるには、次の拡張が考えられます。
 
 現在はコライダーの前回形状と現在形状を保存し、サブステップごとに補間しています。
@@ -733,9 +739,9 @@ ParticleWorldは前回と現在の形状を保存し、各サブステップで�
 
 初めてソースコードを読む場合は、次の順番がおすすめです。
 
-1. `ParticleWorldSettings`と`ParticleDesc`で入力データを確認する。
-2. `ParticleWorld::Add()`で内部スロットへの保存方法を見る。
-3. `ParticleWorld::Step()`の外側から、サブステップの構造を追う。
+1. `PhysicsWorldSettings`と`PhysicsParticleDesc`で入力データを確認する。
+2. `PhysicsWorld::AddParticle()`で内部スロットへの保存方法を見る。
+3. `PhysicsWorld::Update()`の外側から、サブステップの構造を追う。
 4. 重力による積分処理を見る。
 5. `buildParticlePairs`で空間ハッシュと候補ペアの作り方を見る。
 6. 粒子同士の位置補正を見る。
@@ -765,3 +771,6 @@ ParticleWorldは前回と現在の形状を保存し、各サブステップで�
 
 `SphericalShellCapScene`では、左ドラッグで器をXZ平面上へ、マウスホイールで上下へ動かせます。
 `A`で自動往復を開始すると、移動する静的コライダーに粒子が追従する様子と、すり抜け数を確認できます。
+
+
+

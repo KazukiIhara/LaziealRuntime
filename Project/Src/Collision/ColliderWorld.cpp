@@ -41,10 +41,6 @@ namespace {
 
 namespace LGF::Collision {
 
-	bool ObjectHandle::IsValid() const {
-		return index != InvalidIndex && generation != 0u;
-	}
-
 	bool ColliderHandle::IsValid() const {
 		return index != InvalidIndex && generation != 0u;
 	}

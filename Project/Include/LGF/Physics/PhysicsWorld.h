@@ -1,6 +1,7 @@
 #pragma once
 
 #include "LGF/Collision/Shapes3D.h"
+#include "LGF/ObjectHandle.h"
 
 #include <cstddef>
 #include <cstdint>
@@ -18,10 +19,19 @@ namespace LGF::Physics {
 		uint32_t index = InvalidIndex;
 		uint32_t generation{};
 
-		// ハンドルが有効な値を持っているか調べる
 		bool IsValid() const;
-		// 2つのハンドルが同じオブジェクトを指しているか比較する
 		bool operator==(const StaticObjectHandle&) const = default;
+	};
+
+	// 登録されたキネマティックオブジェクトを識別するハンドル
+	struct KinematicObjectHandle {
+		static constexpr uint32_t InvalidIndex = std::numeric_limits<uint32_t>::max();
+
+		uint32_t index = InvalidIndex;
+		uint32_t generation{};
+
+		bool IsValid() const;
+		bool operator==(const KinematicObjectHandle&) const = default;
 	};
 
 	// 登録された動的オブジェクトを識別するハンドル
@@ -31,41 +41,102 @@ namespace LGF::Physics {
 		uint32_t index = InvalidIndex;
 		uint32_t generation{};
 
-		// ハンドルが有効な値を持っているか調べる
 		bool IsValid() const;
-		// 2つのハンドルが同じオブジェクトを指しているか比較する
 		bool operator==(const DynamicObjectHandle&) const = default;
 	};
 
-	// 静的オブジェクトが持てる形状。
-	// 初期実装ではOBBのみを扱い、形状を増やす際はvariantへ型を追加する。
-	using StaticObjectShape = std::variant<Collision::OBB>;
+	// 登録された物理粒子を識別するハンドル
+	struct PhysicsParticleHandle {
+		static constexpr uint32_t InvalidIndex = std::numeric_limits<uint32_t>::max();
 
-	// 動的オブジェクトが持てる形状。
-	// 初期実装ではSphereのみを扱い、形状を増やす際はvariantへ型を追加する。
+		uint32_t index = InvalidIndex;
+		uint32_t generation{};
+
+		bool IsValid() const;
+		bool operator==(const PhysicsParticleHandle&) const = default;
+	};
+
+	// 衝突時に使用する反発と摩擦の係数
+	struct PhysicsMaterial {
+		float restitution = 0.1f;
+		float friction = 0.4f;
+	};
+
+	// 静的オブジェクトが持てる形状
+	using StaticObjectShape = std::variant<
+		Collision::Sphere,
+		Collision::SphericalCap,
+		Collision::SphericalShellCap,
+		Collision::AABB,
+		Collision::OBB>;
+
+	// キネマティックオブジェクトが持てる形状
+	using KinematicObjectShape = StaticObjectShape;
+
+	// 動的オブジェクトが持てる形状
 	using DynamicObjectShape = std::variant<Collision::Sphere>;
+
+	// 静的オブジェクトの登録オプション
+	struct StaticObjectOptions {
+		PhysicsMaterial material{};
+		ObjectHandle objectHandle{};
+		bool enabled = true;
+	};
 
 	// 静的オブジェクトの登録パラメータ
 	struct StaticObjectDesc {
 		StaticObjectShape shape{};
+		StaticObjectOptions options{};
+	};
+
+	// キネマティックオブジェクトの登録オプション
+	struct KinematicObjectOptions {
+		PhysicsMaterial material{};
+		ObjectHandle objectHandle{};
 		bool enabled = true;
-		uint64_t userData{};
+	};
+
+	// キネマティックオブジェクトの登録パラメータ
+	struct KinematicObjectDesc {
+		KinematicObjectShape shape{};
+		KinematicObjectOptions options{};
 	};
 
 	// 動的オブジェクトの登録パラメータ
 	struct DynamicObjectDesc {
 		DynamicObjectShape shape{};
 		Vector3 velocity{};
+		float mass = 1.0f;
+		PhysicsMaterial material{};
+		ObjectHandle objectHandle{};
 		bool enabled = true;
-		uint64_t userData{};
+	};
+
+	// 物理粒子の登録パラメータ
+	struct PhysicsParticleDesc {
+		Vector3 position{};
+		Vector3 velocity{};
+		float radius = 0.05f;
+		float mass = 1.0f;
+		PhysicsMaterial material{};
+		ObjectHandle objectHandle{};
+		bool enabled = true;
 	};
 
 	// 登録されている静的オブジェクトの状態
 	struct StaticObjectState {
 		StaticObjectHandle handle{};
 		StaticObjectShape shape{};
-		bool enabled{};
-		uint64_t userData{};
+		StaticObjectOptions options{};
+	};
+
+	// 登録されているキネマティックオブジェクトの状態
+	struct KinematicObjectState {
+		KinematicObjectHandle handle{};
+		KinematicObjectShape shape{};
+		Vector3 linearVelocity{};
+		Vector3 angularVelocity{};
+		KinematicObjectOptions options{};
 	};
 
 	// 登録されている動的オブジェクトの状態
@@ -73,8 +144,33 @@ namespace LGF::Physics {
 		DynamicObjectHandle handle{};
 		DynamicObjectShape shape{};
 		Vector3 velocity{};
+		float mass{};
+		PhysicsMaterial material{};
+		ObjectHandle objectHandle{};
 		bool enabled{};
-		uint64_t userData{};
+	};
+
+	// 登録されている物理粒子の状態
+	struct PhysicsParticleState {
+		PhysicsParticleHandle handle{};
+		Vector3 position{};
+		Vector3 velocity{};
+		float radius{};
+		float mass{};
+		PhysicsMaterial material{};
+		ObjectHandle objectHandle{};
+		bool enabled{};
+	};
+
+	// 直前の物理粒子更新で計測した処理時間と衝突候補数
+	struct PhysicsParticleStepStatistics {
+		double totalMilliseconds{};
+		double integrationMilliseconds{};
+		double broadPhaseMilliseconds{};
+		double positionSolveMilliseconds{};
+		double velocitySolveMilliseconds{};
+		double cleanupMilliseconds{};
+		uint64_t candidatePairCount{};
 	};
 
 	// PhysicsWorldのシミュレーション設定
@@ -86,101 +182,242 @@ namespace LGF::Physics {
 		};
 		uint32_t substepCount = 4u;
 		uint32_t solverIterationCount = 4u;
+		float linearDamping = 0.1f;
+		float penetrationSlop = 0.005f;
+		float positionCorrectionRate = 0.2f;
+		float maximumDepenetrationVelocity = 5.0f;
+		float bounceVelocityThreshold = 0.8f;
 		float maximumDeltaTime = 1.0f / 15.0f;
 	};
 
-	// 静的オブジェクトと動的オブジェクトを管理する物理ワールド。
+	// 静的オブジェクト、キネマティックオブジェクト、動的オブジェクト、物理粒子を管理する物理ワールド
 	class PhysicsWorld {
 	private:
 		struct StaticObjectSlot {
 			StaticObjectShape shape{};
-			uint64_t userData{};
+			StaticObjectOptions options{};
 			uint32_t generation = 1u;
-			bool isEnabled = true;
+			bool isOccupied{};
+		};
+
+		struct KinematicObjectSlot {
+			KinematicObjectShape shape{};
+			KinematicObjectShape previousShape{};
+			Vector3 linearVelocity{};
+			Vector3 angularVelocity{};
+			KinematicObjectOptions options{};
+			uint32_t generation = 1u;
 			bool isOccupied{};
 		};
 
 		struct DynamicObjectSlot {
 			DynamicObjectShape shape{};
 			Vector3 velocity{};
-			uint64_t userData{};
+			float inverseMass = 1.0f;
+			PhysicsMaterial material{};
+			ObjectHandle objectHandle{};
 			uint32_t generation = 1u;
 			bool isEnabled = true;
 			bool isOccupied{};
 		};
 
+		struct PhysicsParticlePair {
+			uint32_t firstIndex{};
+			uint32_t secondIndex{};
+		};
+
+		struct PhysicsParticleContactAccumulator {
+			Vector3 normal{};
+			Vector3 surfaceVelocity{};
+			float restitution{};
+			float friction{};
+			uint32_t contactCount{};
+			bool hasCollision{};
+		};
+
+		struct PhysicsParticleSlot {
+			Vector3 position{};
+			Vector3 previousPosition{};
+			Vector3 velocity{};
+			Vector3 force{};
+			float inverseMass = 1.0f;
+			float radius = 0.05f;
+			PhysicsMaterial material{};
+			ObjectHandle objectHandle{};
+			uint32_t generation = 1u;
+			bool isEnabled = true;
+			bool isOccupied{};
+		};
+
+		enum class PhysicsParticleCommandType : uint8_t {
+			SetPosition,
+			SetVelocity,
+			SetMass,
+			SetRadius,
+			SetMaterial,
+			SetObjectHandle,
+			SetEnabled,
+			AddForce,
+			AddImpulse,
+		};
+
+		struct PhysicsParticleCommand {
+			PhysicsParticleCommandType type{};
+			PhysicsParticleHandle handle{};
+			Vector3 vectorValue{};
+			PhysicsMaterial materialValue{};
+			ObjectHandle objectHandleValue{};
+			float scalarValue{};
+			bool boolValue{};
+		};
+
+		struct CollisionSurface {
+			StaticObjectShape shape{};
+			Vector3 referencePosition{};
+			Vector3 linearVelocity{};
+			Vector3 angularVelocity{};
+			PhysicsMaterial material{};
+		};
+
 	public:
-		// 指定された設定で物理ワールドを作成する
 		explicit PhysicsWorld(const PhysicsWorldSettings& settings = {});
 
-		// 静的オブジェクトをワールドへ追加する
 		StaticObjectHandle AddStaticObject(const StaticObjectDesc& desc);
-		// OBBを静的オブジェクトとしてワールドへ追加する
-		StaticObjectHandle AddStaticObject(const Collision::OBB& box, bool enabled = true, uint64_t userData = 0u);
-		// 指定された静的オブジェクトをワールドから削除する
+		StaticObjectHandle AddStaticObject(const StaticObjectShape& shape, const StaticObjectOptions& options = {});
+		StaticObjectHandle AddStaticObject(const Collision::Sphere& sphere, const StaticObjectOptions& options = {});
+		StaticObjectHandle AddStaticObject(const Collision::SphericalCap& sphericalCap, const StaticObjectOptions& options = {});
+		StaticObjectHandle AddStaticObject(const Collision::SphericalShellCap& sphericalShellCap, const StaticObjectOptions& options = {});
+		StaticObjectHandle AddStaticObject(const Collision::AABB& box, const StaticObjectOptions& options = {});
+		StaticObjectHandle AddStaticObject(const Collision::OBB& box, const StaticObjectOptions& options = {});
 		bool RemoveStaticObject(StaticObjectHandle handle);
-		// すべての静的オブジェクトをワールドから削除する
 		void ClearStaticObjects();
-		// 静的オブジェクトのハンドルが現在も有効か調べる
 		bool IsValid(StaticObjectHandle handle) const;
 		std::size_t GetStaticObjectCount() const;
+		bool SetStaticObjectShape(StaticObjectHandle handle, const StaticObjectShape& shape);
+		bool SetStaticObjectOptions(StaticObjectHandle handle, const StaticObjectOptions& options);
+		bool SetObjectHandle(StaticObjectHandle handle, ObjectHandle objectHandle);
 		std::optional<StaticObjectState> GetState(StaticObjectHandle handle) const;
 		void GetStaticObjectStates(std::vector<StaticObjectState>& states) const;
 
-		// 動的オブジェクトをワールドへ追加する
+		KinematicObjectHandle AddKinematicObject(const KinematicObjectDesc& desc);
+		KinematicObjectHandle AddKinematicObject(const KinematicObjectShape& shape, const KinematicObjectOptions& options = {});
+		KinematicObjectHandle AddKinematicObject(const Collision::Sphere& sphere, const KinematicObjectOptions& options = {});
+		KinematicObjectHandle AddKinematicObject(const Collision::SphericalCap& sphericalCap, const KinematicObjectOptions& options = {});
+		KinematicObjectHandle AddKinematicObject(const Collision::SphericalShellCap& sphericalShellCap, const KinematicObjectOptions& options = {});
+		KinematicObjectHandle AddKinematicObject(const Collision::AABB& box, const KinematicObjectOptions& options = {});
+		KinematicObjectHandle AddKinematicObject(const Collision::OBB& box, const KinematicObjectOptions& options = {});
+		bool RemoveKinematicObject(KinematicObjectHandle handle);
+		void ClearKinematicObjects();
+		bool IsValid(KinematicObjectHandle handle) const;
+		std::size_t GetKinematicObjectCount() const;
+		bool SetKinematicObjectShape(KinematicObjectHandle handle, const KinematicObjectShape& shape);
+		bool SetKinematicObjectOptions(KinematicObjectHandle handle, const KinematicObjectOptions& options);
+		bool SetObjectHandle(KinematicObjectHandle handle, ObjectHandle objectHandle);
+		std::optional<KinematicObjectState> GetState(KinematicObjectHandle handle) const;
+		void GetKinematicObjectStates(std::vector<KinematicObjectState>& states) const;
+
 		DynamicObjectHandle AddDynamicObject(const DynamicObjectDesc& desc);
-		// Sphereを動的オブジェクトとしてワールドへ追加する
-		DynamicObjectHandle AddDynamicObject(const Collision::Sphere& sphere, const Vector3& velocity = {}, bool enabled = true, uint64_t userData = 0u);
+		DynamicObjectHandle AddDynamicObject(const Collision::Sphere& sphere, const Vector3& velocity = {}, bool enabled = true, ObjectHandle objectHandle = {});
 		bool SetVelocity(DynamicObjectHandle handle, const Vector3& velocity);
-		// 指定された動的オブジェクトをワールドから削除する
+		bool SetMass(DynamicObjectHandle handle, float mass);
+		bool SetObjectHandle(DynamicObjectHandle handle, ObjectHandle objectHandle);
 		bool RemoveDynamicObject(DynamicObjectHandle handle);
-		// すべての動的オブジェクトをワールドから削除する
 		void ClearDynamicObjects();
-		// 動的オブジェクトのハンドルが現在も有効か調べる
 		bool IsValid(DynamicObjectHandle handle) const;
 		std::size_t GetDynamicObjectCount() const;
 		std::optional<DynamicObjectState> GetState(DynamicObjectHandle handle) const;
 		void GetDynamicObjectStates(std::vector<DynamicObjectState>& states) const;
 
+		PhysicsParticleHandle AddParticle(const PhysicsParticleDesc& desc);
+		bool RemoveParticle(PhysicsParticleHandle handle);
+		void ClearParticles();
+		bool IsValid(PhysicsParticleHandle handle) const;
+		std::size_t GetParticleCount() const;
+
+		// 粒子への変更命令はキューへ追加され、次のUpdate開始時に登録順で反映される
+		bool SetParticlePosition(PhysicsParticleHandle handle, const Vector3& position, bool clearVelocity = true);
+		bool SetParticleVelocity(PhysicsParticleHandle handle, const Vector3& velocity);
+		bool SetParticleMass(PhysicsParticleHandle handle, float mass);
+		bool SetParticleRadius(PhysicsParticleHandle handle, float radius);
+		bool SetParticleMaterial(PhysicsParticleHandle handle, const PhysicsMaterial& material);
+		bool SetObjectHandle(PhysicsParticleHandle handle, ObjectHandle objectHandle);
+		bool SetParticleEnabled(PhysicsParticleHandle handle, bool enabled);
+		bool AddParticleForce(PhysicsParticleHandle handle, const Vector3& force);
+		bool AddParticleImpulse(PhysicsParticleHandle handle, const Vector3& impulse);
+		std::optional<PhysicsParticleState> GetParticleState(PhysicsParticleHandle handle) const;
+		void GetParticleStates(std::vector<PhysicsParticleState>& states) const;
+		const PhysicsParticleStepStatistics& GetLastParticleStepStatistics() const;
+
 		void SetSettings(const PhysicsWorldSettings& settings);
 		const PhysicsWorldSettings& GetSettings() const;
 
-		// ワールドに登録されたすべてのオブジェクトを削除する
 		void Clear();
-		// 指定時間だけ動的オブジェクトのシミュレーションを進める
 		void Update(float deltaTime);
 
 	private:
-		// ハンドルに対応する静的オブジェクトの格納領域を探す
 		StaticObjectSlot* FindStaticObject(StaticObjectHandle handle);
-		// ハンドルに対応する読み取り専用の静的オブジェクト格納領域を探す
 		const StaticObjectSlot* FindStaticObject(StaticObjectHandle handle) const;
-		// 指定インデックスの静的オブジェクトを削除して格納領域を再利用可能にする
 		void RemoveStaticObjectAt(uint32_t index);
 
-		// ハンドルに対応する動的オブジェクトの格納領域を探す
-		DynamicObjectSlot* FindDynamicObject(DynamicObjectHandle handle);
-		// ハンドルに対応する読み取り専用の動的オブジェクト格納領域を探す
-		const DynamicObjectSlot* FindDynamicObject(DynamicObjectHandle handle) const;
-		// 指定インデックスの動的オブジェクトを削除して格納領域を再利用可能にする
-		void RemoveDynamicObjectAt(uint32_t index);
+		KinematicObjectSlot* FindKinematicObject(KinematicObjectHandle handle);
+		const KinematicObjectSlot* FindKinematicObject(KinematicObjectHandle handle) const;
+		void RemoveKinematicObjectAt(uint32_t index);
+		void UpdateKinematicObjectVelocities(float frameTime);
+		void UpdateKinematicObjectHistory();
+		std::vector<CollisionSurface> BuildCollisionSurfaces(float interpolation) const;
 
-		// 重力と速度から動的オブジェクトの位置を更新する
+		DynamicObjectSlot* FindDynamicObject(DynamicObjectHandle handle);
+		const DynamicObjectSlot* FindDynamicObject(DynamicObjectHandle handle) const;
+		void RemoveDynamicObjectAt(uint32_t index);
 		void IntegrateDynamicObjects(float substepTime);
-		// 動的オブジェクトと静的オブジェクトのめり込みを解消する
-		void SolveStaticContacts();
-		// ワールド範囲外へ出た動的オブジェクトを削除する
+		void SolveObjectContacts(const std::vector<CollisionSurface>& collisionSurfaces);
+		void SolveDynamicObjectContacts();
 		void CleanupDynamicObjects();
+
+		PhysicsParticleSlot* FindParticle(PhysicsParticleHandle handle);
+		const PhysicsParticleSlot* FindParticle(PhysicsParticleHandle handle) const;
+		void RemoveParticleAt(uint32_t index);
+		bool QueueParticleCommand(const PhysicsParticleCommand& command);
+		void ApplyParticleCommands();
+		void UpdateParticles(float deltaTime);
+		void IntegrateParticles(float substepTime);
+		std::vector<PhysicsParticlePair> BuildParticlePairs() const;
+		void SolveParticlePositions(
+			const std::vector<PhysicsParticlePair>& particlePairs,
+			const std::vector<CollisionSurface>& collisionSurfaces,
+			float maximumCorrectionPerIteration,
+			std::vector<PhysicsParticleContactAccumulator>& contacts,
+			std::vector<Vector3>& positionCorrections);
+
+		void SolveParticleVelocities(
+			const std::vector<PhysicsParticlePair>& particlePairs,
+			const std::vector<PhysicsParticleContactAccumulator>& contacts,
+			const std::vector<Vector3>& positionCorrections,
+			float substepTime,
+			float damping);
+
+		void CleanupParticles();
 
 	private:
 		PhysicsWorldSettings settings_{};
+
 		std::vector<StaticObjectSlot> staticObjects_;
 		std::vector<uint32_t> freeStaticObjectIndices_;
 		std::size_t staticObjectCount_{};
 
+		std::vector<KinematicObjectSlot> kinematicObjects_;
+		std::vector<uint32_t> freeKinematicObjectIndices_;
+		std::size_t kinematicObjectCount_{};
+
 		std::vector<DynamicObjectSlot> dynamicObjects_;
 		std::vector<uint32_t> freeDynamicObjectIndices_;
 		std::size_t dynamicObjectCount_{};
+
+		std::vector<PhysicsParticleSlot> particles_;
+		std::vector<uint32_t> freeParticleIndices_;
+		std::vector<PhysicsParticleCommand> particleCommands_;
+		std::size_t particleCount_{};
+		PhysicsParticleStepStatistics lastParticleStepStatistics_{};
 	};
 
 }

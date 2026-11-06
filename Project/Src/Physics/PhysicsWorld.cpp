@@ -5,37 +5,44 @@
 #include <type_traits>
 
 #include "../Core/HandleUtility.h"
-#include "LGF/Collision/Collision3D.h"
 #include "LGF/Math/Functions/VectorMath.h"
+#include "PhysicsWorldUtility.h"
 
 namespace {
 
 	using namespace LGF;
 
-	bool IsFinite(const Vector3& value) {
-		return std::isfinite(value.x) &&
-			std::isfinite(value.y) &&
-			std::isfinite(value.z);
-	}
-
-	Physics::PhysicsWorldSettings NormalizeSettings(
-		const Physics::PhysicsWorldSettings& settings) {
+	Physics::PhysicsWorldSettings AdjustSettings(const Physics::PhysicsWorldSettings& settings) {
 		Physics::PhysicsWorldSettings result = settings;
-		if (!IsFinite(result.gravity)) {
+		if (!Physics::Internal::IsFinite(result.gravity)) {
 			result.gravity = { 0.0f, -9.8f, 0.0f };
 		}
 		if (!Collision::IsValid(result.worldBounds) ||
-			!IsFinite(result.worldBounds.min) ||
-			!IsFinite(result.worldBounds.max)) {
+			!Physics::Internal::IsFinite(result.worldBounds.min) ||
+			!Physics::Internal::IsFinite(result.worldBounds.max)) {
 			result.worldBounds = {
 				.min = { -100.0f, -100.0f, -100.0f },
 				.max = { 100.0f, 100.0f, 100.0f },
 			};
 		}
 		result.substepCount = std::max(result.substepCount, 1u);
-		result.solverIterationCount = std::max(
-			result.solverIterationCount,
-			1u);
+		result.solverIterationCount = std::max(result.solverIterationCount, 1u);
+		result.linearDamping = std::isfinite(result.linearDamping)
+			? std::max(result.linearDamping, 0.0f)
+			: 0.1f;
+		result.penetrationSlop = std::isfinite(result.penetrationSlop)
+			? std::max(result.penetrationSlop, 0.0f)
+			: 0.005f;
+		result.positionCorrectionRate = std::isfinite(result.positionCorrectionRate)
+			? std::clamp(result.positionCorrectionRate, 0.0f, 1.0f)
+			: 0.2f;
+		result.maximumDepenetrationVelocity =
+			std::isfinite(result.maximumDepenetrationVelocity)
+			? std::max(result.maximumDepenetrationVelocity, 0.0f)
+			: 5.0f;
+		result.bounceVelocityThreshold = std::isfinite(result.bounceVelocityThreshold)
+			? std::max(result.bounceVelocityThreshold, 0.0f)
+			: 0.8f;
 		if (!std::isfinite(result.maximumDeltaTime) ||
 			result.maximumDeltaTime <= 0.0f) {
 			result.maximumDeltaTime = 1.0f / 15.0f;
@@ -43,16 +50,14 @@ namespace {
 		return result;
 	}
 
-	bool IsShapeValid(const Physics::StaticObjectShape& shape) {
+	bool IsDynamicObjectShapeValid(const Physics::DynamicObjectShape& shape) {
 		return std::visit([](const auto& value) {
 			return Collision::IsValid(value);
 			}, shape);
 	}
 
-	bool IsShapeValid(const Physics::DynamicObjectShape& shape) {
-		return std::visit([](const auto& value) {
-			return Collision::IsValid(value);
-			}, shape);
+	bool IsDynamicObjectMassValid(float mass) {
+		return std::isfinite(mass) && mass >= std::numeric_limits<float>::min();
 	}
 
 	Vector3 GetPosition(const Physics::DynamicObjectShape& shape) {
@@ -67,44 +72,6 @@ namespace {
 			}, shape);
 	}
 
-	struct StaticContact {
-		Vector3 normal{};
-		float penetrationDepth{};
-	};
-
-	std::optional<StaticContact> FindContact(
-		const Physics::DynamicObjectShape& dynamicShape,
-		const Physics::StaticObjectShape& staticShape) {
-		return std::visit([](
-			const auto& dynamicObject,
-			const auto& staticObject) -> std::optional<StaticContact> {
-			using DynamicShape = std::decay_t<decltype(dynamicObject)>;
-			using StaticShape = std::decay_t<decltype(staticObject)>;
-			if constexpr (
-				std::is_same_v<DynamicShape, Collision::Sphere> &&
-				std::is_same_v<StaticShape, Collision::OBB>) {
-				const std::optional<Collision::Contact> contact =
-					Collision::Collide(dynamicObject, staticObject);
-				if (!contact) {
-					return std::nullopt;
-				}
-
-				// 球の中心が箱の外側なら、接触法線とは反対へ押し戻す。
-				// 中心まで箱へ入った場合は、Collision側が返す最寄り面の方向へ出す。
-				const bool centerInside = Collision::Contains(
-					staticObject,
-					dynamicObject.center);
-				return StaticContact{
-					.normal = centerInside ? contact->normal : -contact->normal,
-					.penetrationDepth = contact->penetrationDepth,
-				};
-			} else {
-				// variantへ形状を追加した時点では、未対応の組み合わせを衝突なしとして扱う。
-				return std::nullopt;
-			}
-			}, dynamicShape, staticShape);
-	}
-
 }
 
 namespace LGF::Physics {
@@ -113,17 +80,20 @@ namespace LGF::Physics {
 		return index != InvalidIndex && generation != 0u;
 	}
 
+	bool KinematicObjectHandle::IsValid() const {
+		return index != InvalidIndex && generation != 0u;
+	}
+
 	bool DynamicObjectHandle::IsValid() const {
 		return index != InvalidIndex && generation != 0u;
 	}
 
 	PhysicsWorld::PhysicsWorld(const PhysicsWorldSettings& settings) :
-		settings_(NormalizeSettings(settings)) {
+		settings_(AdjustSettings(settings)) {
 	}
 
-	StaticObjectHandle PhysicsWorld::AddStaticObject(
-		const StaticObjectDesc& desc) {
-		if (!IsShapeValid(desc.shape)) {
+	StaticObjectHandle PhysicsWorld::AddStaticObject(const StaticObjectDesc& desc) {
+		if (!Internal::IsStaticObjectShapeValid(desc.shape)) {
 			return {};
 		}
 
@@ -138,26 +108,46 @@ namespace LGF::Physics {
 
 		StaticObjectSlot& object = staticObjects_[index];
 		const uint32_t generation = object.generation;
+		const StaticObjectOptions options{
+			.material = Internal::NormalizeMaterial(desc.options.material),
+			.objectHandle = desc.options.objectHandle,
+			.enabled = desc.options.enabled,
+		};
 		object = StaticObjectSlot{
 			.shape = desc.shape,
-			.userData = desc.userData,
+			.options = options,
 			.generation = generation,
-			.isEnabled = desc.enabled,
 			.isOccupied = true,
 		};
 		++staticObjectCount_;
 		return { index, generation };
 	}
 
-	StaticObjectHandle PhysicsWorld::AddStaticObject(
-		const Collision::OBB& box,
-		bool enabled,
-		uint64_t userData) {
+	StaticObjectHandle PhysicsWorld::AddStaticObject(const StaticObjectShape& shape, const StaticObjectOptions& options) {
 		return AddStaticObject({
-			.shape = StaticObjectShape{ box },
-			.enabled = enabled,
-			.userData = userData,
+			.shape = shape,
+			.options = options,
 		});
+	}
+
+	StaticObjectHandle PhysicsWorld::AddStaticObject(const Collision::Sphere& sphere, const StaticObjectOptions& options) {
+		return AddStaticObject(StaticObjectShape{ sphere }, options);
+	}
+
+	StaticObjectHandle PhysicsWorld::AddStaticObject(const Collision::SphericalCap& sphericalCap, const StaticObjectOptions& options) {
+		return AddStaticObject(StaticObjectShape{ sphericalCap }, options);
+	}
+
+	StaticObjectHandle PhysicsWorld::AddStaticObject(const Collision::SphericalShellCap& sphericalShellCap, const StaticObjectOptions& options) {
+		return AddStaticObject(StaticObjectShape{ sphericalShellCap }, options);
+	}
+
+	StaticObjectHandle PhysicsWorld::AddStaticObject(const Collision::AABB& box, const StaticObjectOptions& options) {
+		return AddStaticObject(StaticObjectShape{ box }, options);
+	}
+
+	StaticObjectHandle PhysicsWorld::AddStaticObject(const Collision::OBB& box, const StaticObjectOptions& options) {
+		return AddStaticObject(StaticObjectShape{ box }, options);
 	}
 
 	bool PhysicsWorld::RemoveStaticObject(StaticObjectHandle handle) {
@@ -174,7 +164,7 @@ namespace LGF::Physics {
 		for (uint32_t index = 0u; index < staticObjects_.size(); ++index) {
 			StaticObjectSlot& object = staticObjects_[index];
 			if (object.isOccupied) {
-				object.generation = Internal::NextGeneration(object.generation);
+				object.generation = LGF::Internal::NextGeneration(object.generation);
 			}
 			object.isOccupied = false;
 			freeStaticObjectIndices_.push_back(index);
@@ -190,8 +180,38 @@ namespace LGF::Physics {
 		return staticObjectCount_;
 	}
 
-	std::optional<StaticObjectState> PhysicsWorld::GetState(
-		StaticObjectHandle handle) const {
+	bool PhysicsWorld::SetStaticObjectShape(StaticObjectHandle handle, const StaticObjectShape& shape) {
+		StaticObjectSlot* object = FindStaticObject(handle);
+		if (!object || !Internal::IsStaticObjectShapeValid(shape)) {
+			return false;
+		}
+		object->shape = shape;
+		return true;
+	}
+
+	bool PhysicsWorld::SetStaticObjectOptions(StaticObjectHandle handle, const StaticObjectOptions& options) {
+		StaticObjectSlot* object = FindStaticObject(handle);
+		if (!object) {
+			return false;
+		}
+		object->options = {
+			.material = Internal::NormalizeMaterial(options.material),
+			.objectHandle = options.objectHandle,
+			.enabled = options.enabled,
+		};
+		return true;
+	}
+
+	bool PhysicsWorld::SetObjectHandle(StaticObjectHandle handle, ObjectHandle objectHandle) {
+		StaticObjectSlot* object = FindStaticObject(handle);
+		if (!object) {
+			return false;
+		}
+		object->options.objectHandle = objectHandle;
+		return true;
+	}
+
+	std::optional<StaticObjectState> PhysicsWorld::GetState(StaticObjectHandle handle) const {
 		const StaticObjectSlot* object = FindStaticObject(handle);
 		if (!object) {
 			return std::nullopt;
@@ -199,13 +219,11 @@ namespace LGF::Physics {
 		return StaticObjectState{
 			.handle = handle,
 			.shape = object->shape,
-			.enabled = object->isEnabled,
-			.userData = object->userData,
+			.options = object->options,
 		};
 	}
 
-	void PhysicsWorld::GetStaticObjectStates(
-		std::vector<StaticObjectState>& states) const {
+	void PhysicsWorld::GetStaticObjectStates(std::vector<StaticObjectState>& states) const {
 		states.clear();
 		states.reserve(staticObjectCount_);
 		for (uint32_t index = 0u; index < staticObjects_.size(); ++index) {
@@ -216,15 +234,167 @@ namespace LGF::Physics {
 			states.push_back({
 				.handle = { index, object.generation },
 				.shape = object.shape,
-				.enabled = object.isEnabled,
-				.userData = object.userData,
+				.options = object.options,
 			});
 		}
 	}
 
-	DynamicObjectHandle PhysicsWorld::AddDynamicObject(
-		const DynamicObjectDesc& desc) {
-		if (!IsShapeValid(desc.shape) || !IsFinite(desc.velocity)) {
+	KinematicObjectHandle PhysicsWorld::AddKinematicObject(const KinematicObjectDesc& desc) {
+		if (!Internal::IsStaticObjectShapeValid(desc.shape)) {
+			return {};
+		}
+
+		uint32_t index = 0u;
+		if (freeKinematicObjectIndices_.empty()) {
+			index = static_cast<uint32_t>(kinematicObjects_.size());
+			kinematicObjects_.emplace_back();
+		} else {
+			index = freeKinematicObjectIndices_.back();
+			freeKinematicObjectIndices_.pop_back();
+		}
+
+		KinematicObjectSlot& object = kinematicObjects_[index];
+		const uint32_t generation = object.generation;
+		const KinematicObjectOptions options{
+			.material = Internal::NormalizeMaterial(desc.options.material),
+			.objectHandle = desc.options.objectHandle,
+			.enabled = desc.options.enabled,
+		};
+		object = KinematicObjectSlot{
+			.shape = desc.shape,
+			.previousShape = desc.shape,
+			.options = options,
+			.generation = generation,
+			.isOccupied = true,
+		};
+		++kinematicObjectCount_;
+		return { index, generation };
+	}
+
+	KinematicObjectHandle PhysicsWorld::AddKinematicObject(const KinematicObjectShape& shape, const KinematicObjectOptions& options) {
+		return AddKinematicObject({
+			.shape = shape,
+			.options = options,
+		});
+	}
+
+	KinematicObjectHandle PhysicsWorld::AddKinematicObject(const Collision::Sphere& sphere, const KinematicObjectOptions& options) {
+		return AddKinematicObject(KinematicObjectShape{ sphere }, options);
+	}
+
+	KinematicObjectHandle PhysicsWorld::AddKinematicObject(const Collision::SphericalCap& sphericalCap, const KinematicObjectOptions& options) {
+		return AddKinematicObject(KinematicObjectShape{ sphericalCap }, options);
+	}
+
+	KinematicObjectHandle PhysicsWorld::AddKinematicObject(const Collision::SphericalShellCap& sphericalShellCap, const KinematicObjectOptions& options) {
+		return AddKinematicObject(KinematicObjectShape{ sphericalShellCap }, options);
+	}
+
+	KinematicObjectHandle PhysicsWorld::AddKinematicObject(const Collision::AABB& box, const KinematicObjectOptions& options) {
+		return AddKinematicObject(KinematicObjectShape{ box }, options);
+	}
+
+	KinematicObjectHandle PhysicsWorld::AddKinematicObject(const Collision::OBB& box, const KinematicObjectOptions& options) {
+		return AddKinematicObject(KinematicObjectShape{ box }, options);
+	}
+
+	bool PhysicsWorld::RemoveKinematicObject(KinematicObjectHandle handle) {
+		if (!FindKinematicObject(handle)) {
+			return false;
+		}
+		RemoveKinematicObjectAt(handle.index);
+		return true;
+	}
+
+	void PhysicsWorld::ClearKinematicObjects() {
+		freeKinematicObjectIndices_.clear();
+		freeKinematicObjectIndices_.reserve(kinematicObjects_.size());
+		for (uint32_t index = 0u; index < kinematicObjects_.size(); ++index) {
+			KinematicObjectSlot& object = kinematicObjects_[index];
+			if (object.isOccupied) {
+				object.generation = LGF::Internal::NextGeneration(object.generation);
+			}
+			object.isOccupied = false;
+			freeKinematicObjectIndices_.push_back(index);
+		}
+		kinematicObjectCount_ = 0u;
+	}
+
+	bool PhysicsWorld::IsValid(KinematicObjectHandle handle) const {
+		return FindKinematicObject(handle) != nullptr;
+	}
+
+	std::size_t PhysicsWorld::GetKinematicObjectCount() const {
+		return kinematicObjectCount_;
+	}
+
+	bool PhysicsWorld::SetKinematicObjectShape(KinematicObjectHandle handle, const KinematicObjectShape& shape) {
+		KinematicObjectSlot* object = FindKinematicObject(handle);
+		if (!object || !Internal::IsStaticObjectShapeValid(shape)) {
+			return false;
+		}
+		object->shape = shape;
+		return true;
+	}
+
+	bool PhysicsWorld::SetKinematicObjectOptions(KinematicObjectHandle handle, const KinematicObjectOptions& options) {
+		KinematicObjectSlot* object = FindKinematicObject(handle);
+		if (!object) {
+			return false;
+		}
+		object->options = {
+			.material = Internal::NormalizeMaterial(options.material),
+			.objectHandle = options.objectHandle,
+			.enabled = options.enabled,
+		};
+		return true;
+	}
+
+	bool PhysicsWorld::SetObjectHandle(KinematicObjectHandle handle, ObjectHandle objectHandle) {
+		KinematicObjectSlot* object = FindKinematicObject(handle);
+		if (!object) {
+			return false;
+		}
+		object->options.objectHandle = objectHandle;
+		return true;
+	}
+
+	std::optional<KinematicObjectState> PhysicsWorld::GetState(KinematicObjectHandle handle) const {
+		const KinematicObjectSlot* object = FindKinematicObject(handle);
+		if (!object) {
+			return std::nullopt;
+		}
+		return KinematicObjectState{
+			.handle = handle,
+			.shape = object->shape,
+			.linearVelocity = object->linearVelocity,
+			.angularVelocity = object->angularVelocity,
+			.options = object->options,
+		};
+	}
+
+	void PhysicsWorld::GetKinematicObjectStates(std::vector<KinematicObjectState>& states) const {
+		states.clear();
+		states.reserve(kinematicObjectCount_);
+		for (uint32_t index = 0u; index < kinematicObjects_.size(); ++index) {
+			const KinematicObjectSlot& object = kinematicObjects_[index];
+			if (!object.isOccupied) {
+				continue;
+			}
+			states.push_back({
+				.handle = { index, object.generation },
+				.shape = object.shape,
+				.linearVelocity = object.linearVelocity,
+				.angularVelocity = object.angularVelocity,
+				.options = object.options,
+			});
+		}
+	}
+
+	DynamicObjectHandle PhysicsWorld::AddDynamicObject(const DynamicObjectDesc& desc) {
+		if (!IsDynamicObjectShapeValid(desc.shape) ||
+			!Internal::IsFinite(desc.velocity) ||
+			!IsDynamicObjectMassValid(desc.mass)) {
 			return {};
 		}
 
@@ -242,7 +412,9 @@ namespace LGF::Physics {
 		object = DynamicObjectSlot{
 			.shape = desc.shape,
 			.velocity = desc.velocity,
-			.userData = desc.userData,
+			.inverseMass = 1.0f / desc.mass,
+			.material = Internal::NormalizeMaterial(desc.material),
+			.objectHandle = desc.objectHandle,
 			.generation = generation,
 			.isEnabled = desc.enabled,
 			.isOccupied = true,
@@ -251,27 +423,39 @@ namespace LGF::Physics {
 		return { index, generation };
 	}
 
-	DynamicObjectHandle PhysicsWorld::AddDynamicObject(
-		const Collision::Sphere& sphere,
-		const Vector3& velocity,
-		bool enabled,
-		uint64_t userData) {
+	DynamicObjectHandle PhysicsWorld::AddDynamicObject(const Collision::Sphere& sphere, const Vector3& velocity, bool enabled, ObjectHandle objectHandle) {
 		return AddDynamicObject({
 			.shape = DynamicObjectShape{ sphere },
 			.velocity = velocity,
+			.objectHandle = objectHandle,
 			.enabled = enabled,
-			.userData = userData,
 		});
 	}
 
-	bool PhysicsWorld::SetVelocity(
-		DynamicObjectHandle handle,
-		const Vector3& velocity) {
+	bool PhysicsWorld::SetVelocity(DynamicObjectHandle handle, const Vector3& velocity) {
 		DynamicObjectSlot* object = FindDynamicObject(handle);
-		if (!object || !IsFinite(velocity)) {
+		if (!object || !Internal::IsFinite(velocity)) {
 			return false;
 		}
 		object->velocity = velocity;
+		return true;
+	}
+
+	bool PhysicsWorld::SetMass(DynamicObjectHandle handle, float mass) {
+		DynamicObjectSlot* object = FindDynamicObject(handle);
+		if (!object || !IsDynamicObjectMassValid(mass)) {
+			return false;
+		}
+		object->inverseMass = 1.0f / mass;
+		return true;
+	}
+
+	bool PhysicsWorld::SetObjectHandle(DynamicObjectHandle handle, ObjectHandle objectHandle) {
+		DynamicObjectSlot* object = FindDynamicObject(handle);
+		if (!object) {
+			return false;
+		}
+		object->objectHandle = objectHandle;
 		return true;
 	}
 
@@ -289,7 +473,7 @@ namespace LGF::Physics {
 		for (uint32_t index = 0u; index < dynamicObjects_.size(); ++index) {
 			DynamicObjectSlot& object = dynamicObjects_[index];
 			if (object.isOccupied) {
-				object.generation = Internal::NextGeneration(object.generation);
+				object.generation = LGF::Internal::NextGeneration(object.generation);
 			}
 			object.isOccupied = false;
 			freeDynamicObjectIndices_.push_back(index);
@@ -305,8 +489,7 @@ namespace LGF::Physics {
 		return dynamicObjectCount_;
 	}
 
-	std::optional<DynamicObjectState> PhysicsWorld::GetState(
-		DynamicObjectHandle handle) const {
+	std::optional<DynamicObjectState> PhysicsWorld::GetState(DynamicObjectHandle handle) const {
 		const DynamicObjectSlot* object = FindDynamicObject(handle);
 		if (!object) {
 			return std::nullopt;
@@ -315,13 +498,14 @@ namespace LGF::Physics {
 			.handle = handle,
 			.shape = object->shape,
 			.velocity = object->velocity,
+			.mass = 1.0f / object->inverseMass,
+			.material = object->material,
+			.objectHandle = object->objectHandle,
 			.enabled = object->isEnabled,
-			.userData = object->userData,
 		};
 	}
 
-	void PhysicsWorld::GetDynamicObjectStates(
-		std::vector<DynamicObjectState>& states) const {
+	void PhysicsWorld::GetDynamicObjectStates(std::vector<DynamicObjectState>& states) const {
 		states.clear();
 		states.reserve(dynamicObjectCount_);
 		for (uint32_t index = 0u; index < dynamicObjects_.size(); ++index) {
@@ -333,14 +517,16 @@ namespace LGF::Physics {
 				.handle = { index, object.generation },
 				.shape = object.shape,
 				.velocity = object.velocity,
+				.mass = 1.0f / object.inverseMass,
+				.material = object.material,
+				.objectHandle = object.objectHandle,
 				.enabled = object.isEnabled,
-				.userData = object.userData,
 			});
 		}
 	}
 
 	void PhysicsWorld::SetSettings(const PhysicsWorldSettings& settings) {
-		settings_ = NormalizeSettings(settings);
+		settings_ = AdjustSettings(settings);
 	}
 
 	const PhysicsWorldSettings& PhysicsWorld::GetSettings() const {
@@ -349,34 +535,38 @@ namespace LGF::Physics {
 
 	void PhysicsWorld::Clear() {
 		ClearStaticObjects();
+		ClearKinematicObjects();
 		ClearDynamicObjects();
+		ClearParticles();
 	}
 
 	void PhysicsWorld::Update(float deltaTime) {
-		if (!std::isfinite(deltaTime) || deltaTime <= 0.0f ||
-			dynamicObjectCount_ == 0u) {
+		if (!std::isfinite(deltaTime) || deltaTime <= 0.0f) {
 			return;
 		}
 
-		// 大きすぎる経過時間を抑え、さらにサブステップへ分けて
-		// 1回の移動量を小さくすることで床をすり抜けにくくする。
 		const float frameTime = std::min(deltaTime, settings_.maximumDeltaTime);
-		const float substepTime = frameTime /
-			static_cast<float>(settings_.substepCount);
-		for (uint32_t substep = 0u; substep < settings_.substepCount; ++substep) {
-			IntegrateDynamicObjects(substepTime);
-			for (uint32_t iteration = 0u;
-				iteration < settings_.solverIterationCount;
-				++iteration) {
-				SolveStaticContacts();
+		UpdateKinematicObjectVelocities(frameTime);
+		UpdateParticles(frameTime);
+
+		if (dynamicObjectCount_ > 0u) {
+			const float substepTime = frameTime / static_cast<float>(settings_.substepCount);
+			for (uint32_t substep = 0u; substep < settings_.substepCount; ++substep) {
+				const float interpolation = static_cast<float>(substep + 1u) / static_cast<float>(settings_.substepCount);
+				const std::vector<CollisionSurface> collisionSurfaces = BuildCollisionSurfaces(interpolation);
+				IntegrateDynamicObjects(substepTime);
+				for (uint32_t iteration = 0u; iteration < settings_.solverIterationCount; ++iteration) {
+					SolveObjectContacts(collisionSurfaces);
+					SolveDynamicObjectContacts();
+				}
 			}
+			CleanupDynamicObjects();
 		}
 
-		CleanupDynamicObjects();
+		UpdateKinematicObjectHistory();
 	}
 
-	PhysicsWorld::StaticObjectSlot* PhysicsWorld::FindStaticObject(
-		StaticObjectHandle handle) {
+	PhysicsWorld::StaticObjectSlot* PhysicsWorld::FindStaticObject(StaticObjectHandle handle) {
 		if (!handle.IsValid() || handle.index >= staticObjects_.size()) {
 			return nullptr;
 		}
@@ -386,8 +576,7 @@ namespace LGF::Physics {
 			: nullptr;
 	}
 
-	const PhysicsWorld::StaticObjectSlot* PhysicsWorld::FindStaticObject(
-		StaticObjectHandle handle) const {
+	const PhysicsWorld::StaticObjectSlot* PhysicsWorld::FindStaticObject(StaticObjectHandle handle) const {
 		if (!handle.IsValid() || handle.index >= staticObjects_.size()) {
 			return nullptr;
 		}
@@ -403,13 +592,93 @@ namespace LGF::Physics {
 			return;
 		}
 		object.isOccupied = false;
-		object.generation = Internal::NextGeneration(object.generation);
+		object.generation = LGF::Internal::NextGeneration(object.generation);
 		freeStaticObjectIndices_.push_back(index);
 		--staticObjectCount_;
 	}
 
-	PhysicsWorld::DynamicObjectSlot* PhysicsWorld::FindDynamicObject(
-		DynamicObjectHandle handle) {
+	PhysicsWorld::KinematicObjectSlot* PhysicsWorld::FindKinematicObject(KinematicObjectHandle handle) {
+		if (!handle.IsValid() || handle.index >= kinematicObjects_.size()) {
+			return nullptr;
+		}
+		KinematicObjectSlot& object = kinematicObjects_[handle.index];
+		return object.isOccupied && object.generation == handle.generation
+			? &object
+			: nullptr;
+	}
+
+	const PhysicsWorld::KinematicObjectSlot* PhysicsWorld::FindKinematicObject(KinematicObjectHandle handle) const {
+		if (!handle.IsValid() || handle.index >= kinematicObjects_.size()) {
+			return nullptr;
+		}
+		const KinematicObjectSlot& object = kinematicObjects_[handle.index];
+		return object.isOccupied && object.generation == handle.generation
+			? &object
+			: nullptr;
+	}
+
+	void PhysicsWorld::RemoveKinematicObjectAt(uint32_t index) {
+		KinematicObjectSlot& object = kinematicObjects_[index];
+		if (!object.isOccupied) {
+			return;
+		}
+		object.isOccupied = false;
+		object.generation = LGF::Internal::NextGeneration(object.generation);
+		freeKinematicObjectIndices_.push_back(index);
+		--kinematicObjectCount_;
+	}
+
+	void PhysicsWorld::UpdateKinematicObjectVelocities(float frameTime) {
+		for (KinematicObjectSlot& object : kinematicObjects_) {
+			if (!object.isOccupied || !object.options.enabled) {
+				object.linearVelocity = {};
+				object.angularVelocity = {};
+				continue;
+			}
+			object.linearVelocity = Internal::CalculateStaticObjectLinearVelocity(object.previousShape, object.shape, frameTime);
+			object.angularVelocity = Internal::CalculateStaticObjectAngularVelocity(object.previousShape, object.shape, frameTime);
+		}
+	}
+
+	void PhysicsWorld::UpdateKinematicObjectHistory() {
+		for (KinematicObjectSlot& object : kinematicObjects_) {
+			if (object.isOccupied) {
+				object.previousShape = object.shape;
+			}
+		}
+	}
+
+	std::vector<PhysicsWorld::CollisionSurface> PhysicsWorld::BuildCollisionSurfaces(float interpolation) const {
+		std::vector<CollisionSurface> result;
+		result.reserve(staticObjectCount_ + kinematicObjectCount_);
+
+		for (const StaticObjectSlot& object : staticObjects_) {
+			if (!object.isOccupied || !object.options.enabled) {
+				continue;
+			}
+			result.push_back({
+				.shape = object.shape,
+				.referencePosition = Internal::GetStaticObjectReferencePosition(object.shape),
+				.material = object.options.material,
+			});
+		}
+		for (const KinematicObjectSlot& object : kinematicObjects_) {
+			if (!object.isOccupied || !object.options.enabled) {
+				continue;
+			}
+			const KinematicObjectShape shape = Internal::InterpolateStaticObjectShape(object.previousShape, object.shape, interpolation);
+			result.push_back({
+				.shape = shape,
+				.referencePosition = Internal::GetStaticObjectReferencePosition(shape),
+				.linearVelocity = object.linearVelocity,
+				.angularVelocity = object.angularVelocity,
+				.material = object.options.material,
+			});
+		}
+		return result;
+	}
+
+	PhysicsWorld::DynamicObjectSlot* PhysicsWorld::FindDynamicObject(DynamicObjectHandle handle) {
 		if (!handle.IsValid() || handle.index >= dynamicObjects_.size()) {
 			return nullptr;
 		}
@@ -419,8 +688,7 @@ namespace LGF::Physics {
 			: nullptr;
 	}
 
-	const PhysicsWorld::DynamicObjectSlot* PhysicsWorld::FindDynamicObject(
-		DynamicObjectHandle handle) const {
+	const PhysicsWorld::DynamicObjectSlot* PhysicsWorld::FindDynamicObject(DynamicObjectHandle handle) const {
 		if (!handle.IsValid() || handle.index >= dynamicObjects_.size()) {
 			return nullptr;
 		}
@@ -436,7 +704,7 @@ namespace LGF::Physics {
 			return;
 		}
 		object.isOccupied = false;
-		object.generation = Internal::NextGeneration(object.generation);
+		object.generation = LGF::Internal::NextGeneration(object.generation);
 		freeDynamicObjectIndices_.push_back(index);
 		--dynamicObjectCount_;
 	}
@@ -446,44 +714,93 @@ namespace LGF::Physics {
 			if (!object.isOccupied || !object.isEnabled) {
 				continue;
 			}
-
-			// 速度を更新してから位置へ反映する半陰的オイラー法を使う。
 			object.velocity += settings_.gravity * substepTime;
 			MoveShape(object.shape, object.velocity * substepTime);
 		}
 	}
 
-	void PhysicsWorld::SolveStaticContacts() {
+	void PhysicsWorld::SolveObjectContacts(const std::vector<CollisionSurface>& collisionSurfaces) {
 		for (DynamicObjectSlot& dynamicObject : dynamicObjects_) {
 			if (!dynamicObject.isOccupied || !dynamicObject.isEnabled) {
 				continue;
 			}
 
-			for (const StaticObjectSlot& staticObject : staticObjects_) {
-				if (!staticObject.isOccupied || !staticObject.isEnabled) {
-					continue;
-				}
-
-				const std::optional<StaticContact> contact = FindContact(
-					dynamicObject.shape,
-					staticObject.shape);
+			const auto& sphere = std::get<Collision::Sphere>(dynamicObject.shape);
+			for (const CollisionSurface& collisionSurface : collisionSurfaces) {
+				const std::optional<Internal::StaticContact> contact = Internal::FindContact(sphere, collisionSurface.shape);
 				if (!contact || contact->penetrationDepth <= 0.0f) {
 					continue;
 				}
 
-				// 貫通量を一度で戻し、SphereをOBBの表面へ移動させる。
-				MoveShape(
-					dynamicObject.shape,
-					contact->normal * contact->penetrationDepth);
-
-				// 床へ向かう速度成分だけを取り除く。
-				// 接線方向の速度は残すため、斜面ではそのまま滑る。
-				const float normalSpeed = Math::Dot(
-					dynamicObject.velocity,
-					contact->normal);
+				MoveShape(dynamicObject.shape, contact->normal * contact->penetrationDepth);
+				const Vector3 surfaceVelocity = collisionSurface.linearVelocity + Math::Cross(collisionSurface.angularVelocity, contact->point - collisionSurface.referencePosition);
+				const Vector3 relativeVelocity = dynamicObject.velocity - surfaceVelocity;
+				const float normalSpeed = Math::Dot(relativeVelocity, contact->normal);
 				if (normalSpeed < 0.0f) {
-					dynamicObject.velocity -= contact->normal * normalSpeed;
+					const float restitution = -normalSpeed > settings_.bounceVelocityThreshold ? std::max(dynamicObject.material.restitution, collisionSurface.material.restitution) : 0.0f;
+					const float normalImpulseMagnitude = -(1.0f + restitution) * normalSpeed;
+					Vector3 resolvedRelativeVelocity = relativeVelocity + contact->normal * normalImpulseMagnitude;
+					const Vector3 tangentVelocity = relativeVelocity - contact->normal * normalSpeed;
+					const float tangentSpeed = Math::Length(tangentVelocity);
+					if (tangentSpeed > Math::EPSILON) {
+						const float friction = std::sqrt(dynamicObject.material.friction * collisionSurface.material.friction);
+						const float frictionImpulseMagnitude = std::min(tangentSpeed, friction * normalImpulseMagnitude);
+						resolvedRelativeVelocity -= tangentVelocity / tangentSpeed * frictionImpulseMagnitude;
+					}
+					dynamicObject.velocity = surfaceVelocity + resolvedRelativeVelocity;
 				}
+			}
+		}
+	}
+
+	void PhysicsWorld::SolveDynamicObjectContacts() {
+		for (uint32_t firstIndex = 0u; firstIndex < dynamicObjects_.size(); ++firstIndex) {
+			DynamicObjectSlot& firstObject = dynamicObjects_[firstIndex];
+			if (!firstObject.isOccupied || !firstObject.isEnabled) {
+				continue;
+			}
+
+			for (uint32_t secondIndex = firstIndex + 1u; secondIndex < dynamicObjects_.size(); ++secondIndex) {
+				DynamicObjectSlot& secondObject = dynamicObjects_[secondIndex];
+				if (!secondObject.isOccupied || !secondObject.isEnabled) {
+					continue;
+				}
+
+				const auto& firstSphere = std::get<Collision::Sphere>(firstObject.shape);
+				const auto& secondSphere = std::get<Collision::Sphere>(secondObject.shape);
+				const std::optional<Internal::StaticContact> contact = Internal::FindContact(firstSphere, secondSphere);
+				if (!contact || contact->penetrationDepth <= 0.0f) {
+					continue;
+				}
+
+				const float inverseMassSum = firstObject.inverseMass + secondObject.inverseMass;
+				const Vector3 correction = contact->normal * (contact->penetrationDepth / inverseMassSum);
+				MoveShape(firstObject.shape, correction * firstObject.inverseMass);
+				MoveShape(secondObject.shape, -correction * secondObject.inverseMass);
+
+				const Vector3 relativeVelocity = firstObject.velocity - secondObject.velocity;
+				const float normalSpeed = Math::Dot(relativeVelocity, contact->normal);
+				if (normalSpeed >= 0.0f) {
+					continue;
+				}
+
+				const float restitution = -normalSpeed > settings_.bounceVelocityThreshold ? std::max(firstObject.material.restitution, secondObject.material.restitution) : 0.0f;
+				const float normalImpulseMagnitude = -(1.0f + restitution) * normalSpeed / inverseMassSum;
+				const Vector3 normalImpulse = contact->normal * normalImpulseMagnitude;
+				firstObject.velocity += normalImpulse * firstObject.inverseMass;
+				secondObject.velocity -= normalImpulse * secondObject.inverseMass;
+
+				const Vector3 tangentVelocity = relativeVelocity - contact->normal * normalSpeed;
+				const float tangentSpeed = Math::Length(tangentVelocity);
+				if (tangentSpeed <= Math::EPSILON) {
+					continue;
+				}
+
+				const float friction = std::sqrt(firstObject.material.friction * secondObject.material.friction);
+				const float frictionImpulseMagnitude = std::min(tangentSpeed / inverseMassSum, friction * normalImpulseMagnitude);
+				const Vector3 frictionImpulse = tangentVelocity / tangentSpeed * frictionImpulseMagnitude;
+				firstObject.velocity -= frictionImpulse * firstObject.inverseMass;
+				secondObject.velocity += frictionImpulse * secondObject.inverseMass;
 			}
 		}
 	}

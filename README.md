@@ -90,38 +90,40 @@ if (result) {
 
 ## 物理粒子
 
-`LGF::Physics::ParticleWorld`は、CPU上で球形粒子の落下、粒子間衝突、
-静的コライダーとの衝突、摩擦、反発を計算する簡易物理シミュレーターです。
-静的コライダーには`Collision::Sphere`、`Collision::SphericalCap`、
-`Collision::SphericalShellCap`、`Collision::AABB`を使用できます。
+`LGF::Physics::PhysicsWorld`は、CPU上で球形粒子の落下、粒子間衝突、
+静的オブジェクトとの衝突、摩擦、反発を計算する簡易物理シミュレーターです。
+静的オブジェクトには`Collision::Sphere`、`Collision::SphericalCap`、
+`Collision::SphericalShellCap`、`Collision::AABB`、`Collision::OBB`を使用できます。
 
 ```cpp
-LGF::Physics::ParticleWorld particles({
+LGF::Physics::PhysicsWorld particles({
     .worldBounds = {
         .min = { -20.0f, -10.0f, -20.0f },
         .max = { 20.0f, 20.0f, 20.0f },
     },
 });
 
-particles.AddCollider(LGF::Collision::AABB{
+particles.AddStaticObject(LGF::Collision::AABB{
     .min = { -5.0f, -0.5f, -5.0f },
     .max = { 5.0f, 0.0f, 5.0f },
 });
 
-const LGF::Physics::ParticleHandle particle = particles.Add({
+const LGF::Physics::PhysicsParticleHandle particle = particles.AddParticle({
     .position = { 0.0f, 2.0f, 0.0f },
     .radius = 0.05f,
     .mass = 1.0f,
-    .collisionParameter = {
+    .material = {
         .restitution = 0.2f,
         .friction = 0.5f,
     },
 });
 
-particles.Step(static_cast<float>(LGF::System::DeltaTime()));
+particles.Update(static_cast<float>(LGF::System::DeltaTime()));
 ```
 
-粒子の中心が`ParticleWorldSettings::worldBounds`を越えると、
+粒子の中心が`PhysicsWorldSettings::worldBounds`を越えると、
 その粒子はワールドから自動的に削除されます。
 
-アルゴリズムと内部実装については、[ParticleWorld実装解説](Docs/ParticleWorld.md)を参照してください。
+アルゴリズムと内部実装については、[PhysicsParticle実装解説](Docs/PhysicsParticle.md)を参照してください。
+
+

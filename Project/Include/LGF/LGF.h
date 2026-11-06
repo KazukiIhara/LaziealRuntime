@@ -4,6 +4,7 @@
 #include "LGF/System.h"
 #include "LGF/Window.h"
 #include "LGF/LGFMath.h"
+#include "LGF/ObjectHandle.h"
 #include "LGF/Input.h"
 #include "LGF/Parameter.h"
 #include "LGF/Scene.h"

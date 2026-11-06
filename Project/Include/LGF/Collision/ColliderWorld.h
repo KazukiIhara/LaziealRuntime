@@ -1,6 +1,7 @@
 #pragma once
 
 #include "LGF/Collision/Collision3D.h"
+#include "LGF/ObjectHandle.h"
 
 #include <cstddef>
 #include <cstdint>
@@ -17,16 +18,7 @@ namespace LGF::Collision {
 	using CollisionTag = std::string;
 	using CollisionTagList = std::vector<CollisionTag>;
 
-	/// <summary>ユーザー側のオブジェクトを識別する世代付きハンドル</summary>
-	struct ObjectHandle {
-		static constexpr uint32_t InvalidIndex = std::numeric_limits<uint32_t>::max();
-
-		uint32_t index = InvalidIndex;
-		uint32_t generation{};
-
-		bool IsValid() const;
-		bool operator==(const ObjectHandle&) const = default;
-	};
+	using ObjectHandle = LGF::ObjectHandle;
 
 	/// <summary>登録されたコライダーを識別する世代付きハンドル</summary>
 	struct ColliderHandle {
