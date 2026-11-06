@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <charconv>
 #include <cctype>
+#include <cmath>
 #include <fstream>
 #include <limits>
 #include <string>
@@ -55,6 +56,21 @@ namespace {
 			return true;
 		}
 		return false;
+	}
+
+	bool ParseFloat(std::string_view value, float& result) {
+		value = Trim(value);
+		float parsed = 0.0f;
+		const auto [end, error] = std::from_chars(
+			value.data(),
+			value.data() + value.size(),
+			parsed);
+		if (error != std::errc{} || end != value.data() + value.size() ||
+			!std::isfinite(parsed)) {
+			return false;
+		}
+		result = parsed;
+		return true;
 	}
 
 	std::optional<std::string> WideToUtf8(std::wstring_view value) {
@@ -129,6 +145,9 @@ namespace {
 				<< "vsync = " << config.graphics.vsync << '\n'
 				<< "multiFrameContextEnabled = "
 				<< config.graphics.multiFrameContextEnabled << "\n\n"
+				<< "[Audio]\n"
+				<< "enabled = " << config.audio.enabled << '\n'
+				<< "masterVolume = " << config.audio.masterVolume << "\n\n"
 				<< "[Window]\n"
 				<< "title = " << *windowTitle << '\n'
 				<< "width = " << config.window.width << '\n'
@@ -256,6 +275,15 @@ std::optional<LGF::RuntimeConfig> LGF::LoadRuntimeConfig(
 				}
 			} else if (section == "graphics" && key == "multiframecontextenabled") {
 				if (!ParseBool(value, config.graphics.multiFrameContextEnabled)) {
+					return std::nullopt;
+				}
+			} else if (section == "audio" && key == "enabled") {
+				if (!ParseBool(value, config.audio.enabled)) {
+					return std::nullopt;
+				}
+			} else if (section == "audio" && key == "mastervolume") {
+				if (!ParseFloat(value, config.audio.masterVolume) ||
+					config.audio.masterVolume < 0.0f || config.audio.masterVolume > 1.0f) {
 					return std::nullopt;
 				}
 			} else if (section == "window" && key == "title") {

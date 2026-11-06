@@ -8,6 +8,7 @@
 namespace LGF {
 
 	struct RuntimeConfig;
+	class AudioSystem;
 	class GraphicsSystem;
 	class InputSystem;
 	class TimeSystem;
@@ -41,6 +42,7 @@ namespace LGF {
 		void EndFrame();
 
 		std::unique_ptr<WindowSystem> windowSystem_;
+		std::unique_ptr<AudioSystem> audioSystem_;
 		std::unique_ptr<GraphicsSystem> graphicsSystem_;
 		std::unique_ptr<InputSystem> inputSystem_;
 		std::unique_ptr<TimeSystem> timeSystem_;
