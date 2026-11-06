@@ -1,5 +1,6 @@
 #include "Framework.h"
 
+#include "Audio/System/AudioSystem.h"
 #include "Core/Config/RuntimeConfig.h"
 #include "Core/Time/TimeSystem.h"
 #include "Core/Window/System/WindowSystem.h"
@@ -21,8 +22,15 @@ bool Framework::Initialize(const RuntimeConfig& config) {
 	Win32Window& window = windowSystem_->GetWindow();
 	const Win32Window::Setting windowSetting = window.GetSetting();
 
+	audioSystem_ = std::make_unique<AudioSystem>();
+	if (!audioSystem_->Initialize(config.assetRoot, config.audio)) {
+		windowSystem_->Finalize();
+		return false;
+	}
+
 	inputSystem_ = std::make_unique<InputSystem>();
 	if (!inputSystem_->Initialize(window.GetHwnd(), config.input)) {
+		audioSystem_->Finalize();
 		windowSystem_->Finalize();
 		return false;
 	}
@@ -38,6 +46,7 @@ bool Framework::Initialize(const RuntimeConfig& config) {
 	};
 	if (!graphicsSystem_->Initialize(graphicsDesc)) {
 		inputSystem_->Finalize();
+		audioSystem_->Finalize();
 		windowSystem_->Finalize();
 		return false;
 	}
@@ -60,6 +69,7 @@ bool Framework::Initialize(const RuntimeConfig& config) {
 		window.SetMessageHandler({});
 		graphicsSystem_->Finalize();
 		inputSystem_->Finalize();
+		audioSystem_->Finalize();
 		windowSystem_->Finalize();
 		return false;
 	}
@@ -113,6 +123,9 @@ bool Framework::Finalize() {
 	if (graphicsSystem_) {
 		succeeded = graphicsSystem_->Finalize() && succeeded;
 	}
+	if (audioSystem_) {
+		succeeded = audioSystem_->Finalize() && succeeded;
+	}
 	if (windowSystem_) {
 		succeeded = windowSystem_->Finalize() && succeeded;
 	}
@@ -120,6 +133,7 @@ bool Framework::Finalize() {
 	timeSystem_.reset();
 	inputSystem_.reset();
 	graphicsSystem_.reset();
+	audioSystem_.reset();
 	windowSystem_.reset();
 	return succeeded;
 }

@@ -6,6 +6,7 @@
 #include "LGF/LGFMath.h"
 #include "LGF/ObjectHandle.h"
 #include "LGF/Input.h"
+#include "LGF/Audio.h"
 #include "LGF/Parameter.h"
 #include "LGF/Scene.h"
 #include "LGF/Collision.h"

@@ -40,10 +40,16 @@ namespace LGF {
 		bool multiFrameContextEnabled = true;
 	};
 
+	struct AudioConfig {
+		bool enabled = true;
+		float masterVolume = 1.0f;
+	};
+
 	struct RuntimeConfig {
 		std::filesystem::path assetRoot = "Assets";
 		WindowConfig window{};
 		GraphicsConfig graphics{};
+		AudioConfig audio{};
 		InputConfig input{};
 	};
 
