@@ -12,6 +12,9 @@ namespace LGF {
 	struct AudioConfig;
 	class AudioData;
 
+	/// <summary>
+	/// ‰¹ºÄ¶ƒVƒXƒeƒ€
+	/// </summary>
 	class AudioSystem {
 	public:
 		AudioSystem();
