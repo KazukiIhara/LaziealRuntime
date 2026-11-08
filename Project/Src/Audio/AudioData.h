@@ -5,7 +5,7 @@
 #include <cstdint>
 #include <vector>
 
-namespace LGF::AudioDetail {
+namespace LGF {
 
 	class AudioData {
 	public:

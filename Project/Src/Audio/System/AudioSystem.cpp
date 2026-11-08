@@ -163,13 +163,12 @@ bool AudioSystem::Initialize(
 bool AudioSystem::Finalize() {
 	g_audioSystem = nullptr;
 
-	for (const std::weak_ptr<AudioDetail::AudioData>& weakData : audioData_) {
-		if (const std::shared_ptr<AudioDetail::AudioData> data = weakData.lock()) {
+	for (const std::weak_ptr<AudioData>& weakData : audioData_) {
+		if (const std::shared_ptr<AudioData> data = weakData.lock()) {
 			data->Reset();
 		}
 	}
 	audioData_.clear();
-	loadedAudio_.clear();
 
 	if (masteringVoice_ != nullptr) {
 		masteringVoice_->DestroyVoice();
@@ -186,7 +185,7 @@ bool AudioSystem::Finalize() {
 	return succeeded;
 }
 
-std::shared_ptr<AudioDetail::AudioData> AudioSystem::Create(
+std::shared_ptr<AudioData> AudioSystem::Load(
 	const std::filesystem::path& filePath) {
 	if (!isEnabled_ || !audioEngine_ || filePath.empty()) {
 		return {};
@@ -198,8 +197,8 @@ std::shared_ptr<AudioDetail::AudioData> AudioSystem::Create(
 		return {};
 	}
 
-	std::shared_ptr<AudioDetail::AudioData> data =
-		std::make_shared<AudioDetail::AudioData>(
+	std::shared_ptr<AudioData> data =
+		std::make_shared<AudioData>(
 			*audioEngine_.Get(),
 			std::move(decodedAudio.waveFormat),
 			std::move(decodedAudio.samples));
@@ -213,65 +212,6 @@ std::shared_ptr<AudioDetail::AudioData> AudioSystem::Create(
 	return data;
 }
 
-bool AudioSystem::Load(const std::filesystem::path& filePath) {
-	std::shared_ptr<AudioDetail::AudioData> data = Create(filePath);
-	if (!data) {
-		return false;
-	}
-	loadedAudio_.insert_or_assign(
-		ResolvePath(filePath).native(),
-		std::move(data));
-	return true;
-}
-
-bool AudioSystem::Unload(const std::filesystem::path& filePath) {
-	return loadedAudio_.erase(ResolvePath(filePath).native()) > 0u;
-}
-
-void AudioSystem::UnloadAll() {
-	loadedAudio_.clear();
-}
-
-bool AudioSystem::IsLoaded(const std::filesystem::path& filePath) const {
-	return Find(filePath) != nullptr;
-}
-
-bool AudioSystem::Play(const std::filesystem::path& filePath, bool loop) {
-	const std::shared_ptr<AudioDetail::AudioData> data = Find(filePath);
-	return data && data->SetLoop(loop) && data->Play();
-}
-
-bool AudioSystem::Pause(const std::filesystem::path& filePath) {
-	const std::shared_ptr<AudioDetail::AudioData> data = Find(filePath);
-	return data && data->Pause();
-}
-
-bool AudioSystem::Stop(const std::filesystem::path& filePath) {
-	const std::shared_ptr<AudioDetail::AudioData> data = Find(filePath);
-	return data && data->Stop();
-}
-
-bool AudioSystem::IsPlaying(const std::filesystem::path& filePath) const {
-	const std::shared_ptr<AudioDetail::AudioData> data = Find(filePath);
-	return data && data->IsPlaying();
-}
-
-bool AudioSystem::SetVolume(
-	const std::filesystem::path& filePath,
-	float volume) {
-	const std::shared_ptr<AudioDetail::AudioData> data = Find(filePath);
-	return data && data->SetVolume(volume);
-}
-
-std::shared_ptr<AudioDetail::AudioData> AudioSystem::Find(
-	const std::filesystem::path& filePath) const {
-	if (filePath.empty()) {
-		return {};
-	}
-	const auto iterator = loadedAudio_.find(ResolvePath(filePath).native());
-	return iterator != loadedAudio_.end() ? iterator->second : nullptr;
-}
-
 std::filesystem::path AudioSystem::ResolvePath(
 	const std::filesystem::path& filePath) const {
 	if (filePath.empty()) {
@@ -282,49 +222,7 @@ std::filesystem::path AudioSystem::ResolvePath(
 		: (assetRoot_ / filePath).lexically_normal();
 }
 
-std::shared_ptr<AudioDetail::AudioData> LGF::AudioDetail::Create(
+std::shared_ptr<AudioData> LGF::AudioInternal::Load(
 	const std::filesystem::path& filePath) {
-	return g_audioSystem != nullptr ? g_audioSystem->Create(filePath) : nullptr;
-}
-
-bool LGF::AudioDetail::Load(const std::filesystem::path& filePath) {
-	return g_audioSystem != nullptr && g_audioSystem->Load(filePath);
-}
-
-bool LGF::AudioDetail::Unload(const std::filesystem::path& filePath) {
-	return g_audioSystem != nullptr && g_audioSystem->Unload(filePath);
-}
-
-void LGF::AudioDetail::UnloadAll() {
-	if (g_audioSystem != nullptr) {
-		g_audioSystem->UnloadAll();
-	}
-}
-
-bool LGF::AudioDetail::IsLoaded(const std::filesystem::path& filePath) {
-	return g_audioSystem != nullptr && g_audioSystem->IsLoaded(filePath);
-}
-
-bool LGF::AudioDetail::Play(
-	const std::filesystem::path& filePath,
-	bool loop) {
-	return g_audioSystem != nullptr && g_audioSystem->Play(filePath, loop);
-}
-
-bool LGF::AudioDetail::Pause(const std::filesystem::path& filePath) {
-	return g_audioSystem != nullptr && g_audioSystem->Pause(filePath);
-}
-
-bool LGF::AudioDetail::Stop(const std::filesystem::path& filePath) {
-	return g_audioSystem != nullptr && g_audioSystem->Stop(filePath);
-}
-
-bool LGF::AudioDetail::IsPlaying(const std::filesystem::path& filePath) {
-	return g_audioSystem != nullptr && g_audioSystem->IsPlaying(filePath);
-}
-
-bool LGF::AudioDetail::SetVolume(
-	const std::filesystem::path& filePath,
-	float volume) {
-	return g_audioSystem != nullptr && g_audioSystem->SetVolume(filePath, volume);
+	return g_audioSystem != nullptr ? g_audioSystem->Load(filePath) : nullptr;
 }

@@ -4,7 +4,7 @@
 #include <limits>
 #include <utility>
 
-using namespace LGF::AudioDetail;
+using namespace LGF;
 
 AudioData::AudioData(
 	IXAudio2& audioEngine,

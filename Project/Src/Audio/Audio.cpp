@@ -5,66 +5,14 @@
 
 using namespace LGF;
 
-Audio::Audio(const std::filesystem::path& filePath) {
-	Open(filePath);
+Audio::Audio(const std::filesystem::path& filePath) :
+	data_(AudioInternal::Load(filePath)) {
 }
 
-bool Audio::Load(const std::filesystem::path& filePath) {
-	return AudioDetail::Load(filePath);
-}
-
-bool Audio::Unload(const std::filesystem::path& filePath) {
-	return AudioDetail::Unload(filePath);
-}
-
-void Audio::UnloadAll() {
-	AudioDetail::UnloadAll();
-}
-
-bool Audio::IsLoaded(const std::filesystem::path& filePath) {
-	return AudioDetail::IsLoaded(filePath);
-}
-
-bool Audio::Play(
-	const std::filesystem::path& filePath,
-	bool loop) {
-	return AudioDetail::Play(filePath, loop);
-}
-
-bool Audio::Pause(const std::filesystem::path& filePath) {
-	return AudioDetail::Pause(filePath);
-}
-
-bool Audio::Stop(const std::filesystem::path& filePath) {
-	return AudioDetail::Stop(filePath);
-}
-
-bool Audio::IsPlaying(const std::filesystem::path& filePath) {
-	return AudioDetail::IsPlaying(filePath);
-}
-
-bool Audio::SetVolume(
-	const std::filesystem::path& filePath,
-	float volume) {
-	return AudioDetail::SetVolume(filePath, volume);
-}
-
-bool Audio::Open(const std::filesystem::path& filePath) {
-	Release();
-	data_ = AudioDetail::Create(filePath);
-	return IsValid();
-}
-
-void Audio::Release() {
-	data_.reset();
-}
+Audio::~Audio() = default;
 
 bool Audio::IsValid() const {
 	return data_ && data_->IsValid();
-}
-
-Audio::operator bool() const {
-	return IsValid();
 }
 
 bool Audio::Play() {
