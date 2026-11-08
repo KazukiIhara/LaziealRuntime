@@ -25,7 +25,9 @@ bool Audio::IsLoaded(const std::filesystem::path& filePath) {
 	return AudioDetail::IsLoaded(filePath);
 }
 
-bool Audio::Play(const std::filesystem::path& filePath, bool loop) {
+bool Audio::Play(
+	const std::filesystem::path& filePath,
+	bool loop) {
 	return AudioDetail::Play(filePath, loop);
 }
 
@@ -41,7 +43,9 @@ bool Audio::IsPlaying(const std::filesystem::path& filePath) {
 	return AudioDetail::IsPlaying(filePath);
 }
 
-bool Audio::SetVolume(const std::filesystem::path& filePath, float volume) {
+bool Audio::SetVolume(
+	const std::filesystem::path& filePath,
+	float volume) {
 	return AudioDetail::SetVolume(filePath, volume);
 }
 

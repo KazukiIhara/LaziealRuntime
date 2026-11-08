@@ -12,12 +12,14 @@ AudioData::AudioData(
 	std::vector<uint8_t> samples) :
 	waveFormat_(std::move(waveFormat)),
 	samples_(std::move(samples)) {
-	if (waveFormat_.size() < sizeof(WAVEFORMATEX) || samples_.empty() ||
+	if (waveFormat_.size() < sizeof(WAVEFORMATEX) ||
+		samples_.empty() ||
 		samples_.size() > static_cast<size_t>(std::numeric_limits<uint32_t>::max())) {
 		return;
 	}
 
-	const auto* format = reinterpret_cast<const WAVEFORMATEX*>(waveFormat_.data());
+	const WAVEFORMATEX* format =
+		reinterpret_cast<const WAVEFORMATEX*>(waveFormat_.data());
 	if (format->nSamplesPerSec == 0u || format->nBlockAlign == 0u) {
 		return;
 	}
@@ -156,7 +158,9 @@ double AudioData::GetDuration() const {
 }
 
 double AudioData::GetPosition() const {
-	if (sourceVoice_ == nullptr || sampleRate_ == 0u || state_ == State::Stopped) {
+	if (sourceVoice_ == nullptr ||
+		sampleRate_ == 0u ||
+		state_ == State::Stopped) {
 		return 0.0;
 	}
 

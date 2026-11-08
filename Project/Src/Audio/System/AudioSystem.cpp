@@ -7,8 +7,6 @@
 #include <xaudio2.h>
 
 #include <limits>
-#include <string>
-#include <unordered_map>
 #include <utility>
 #include <vector>
 
@@ -27,9 +25,9 @@ using Microsoft::WRL::ComPtr;
 namespace {
 
 	AudioSystem* g_audioSystem = nullptr;
-	constexpr DWORD AllStreams =
+	constexpr DWORD kAllStreams =
 		static_cast<DWORD>(MF_SOURCE_READER_ALL_STREAMS);
-	constexpr DWORD FirstAudioStream =
+	constexpr DWORD kFirstAudioStream =
 		static_cast<DWORD>(MF_SOURCE_READER_FIRST_AUDIO_STREAM);
 
 	struct DecodedAudio {
@@ -66,8 +64,8 @@ namespace {
 			return false;
 		}
 
-		if (FAILED(reader->SetStreamSelection(AllStreams, FALSE)) ||
-			FAILED(reader->SetStreamSelection(FirstAudioStream, TRUE))) {
+		if (FAILED(reader->SetStreamSelection(kAllStreams, FALSE)) ||
+			FAILED(reader->SetStreamSelection(kFirstAudioStream, TRUE))) {
 			return false;
 		}
 
@@ -76,7 +74,7 @@ namespace {
 			FAILED(requestedType->SetGUID(MF_MT_MAJOR_TYPE, MFMediaType_Audio)) ||
 			FAILED(requestedType->SetGUID(MF_MT_SUBTYPE, MFAudioFormat_PCM)) ||
 			FAILED(reader->SetCurrentMediaType(
-				FirstAudioStream,
+				kFirstAudioStream,
 				nullptr,
 				requestedType.Get()))) {
 			return false;
@@ -84,7 +82,7 @@ namespace {
 
 		ComPtr<IMFMediaType> outputType;
 		if (FAILED(reader->GetCurrentMediaType(
-			FirstAudioStream,
+			kFirstAudioStream,
 			&outputType))) {
 			return false;
 		}
@@ -106,7 +104,7 @@ namespace {
 			DWORD flags = 0u;
 			ComPtr<IMFSample> sample;
 			if (FAILED(reader->ReadSample(
-				FirstAudioStream,
+				kFirstAudioStream,
 				0u,
 				nullptr,
 				&flags,
@@ -131,20 +129,7 @@ namespace {
 
 }
 
-class AudioSystem::Impl {
-public:
-	std::filesystem::path assetRoot;
-	ComPtr<IXAudio2> audioEngine;
-	IXAudio2MasteringVoice* masteringVoice = nullptr;
-	std::vector<std::weak_ptr<AudioDetail::AudioData>> audioData;
-	std::unordered_map<std::wstring, std::shared_ptr<AudioDetail::AudioData>>
-		loadedAudio;
-	bool isMediaFoundationStarted = false;
-	bool enabled = false;
-};
-
-AudioSystem::AudioSystem() :
-	impl_(std::make_unique<Impl>()) {
+AudioSystem::AudioSystem() {
 }
 
 AudioSystem::~AudioSystem() = default;
@@ -152,11 +137,11 @@ AudioSystem::~AudioSystem() = default;
 bool AudioSystem::Initialize(
 	const std::filesystem::path& assetRoot,
 	const AudioConfig& config) {
-	impl_->assetRoot = std::filesystem::absolute(assetRoot).lexically_normal();
-	impl_->enabled = config.enabled;
+	assetRoot_ = std::filesystem::absolute(assetRoot).lexically_normal();
+	isEnabled_ = config.enabled;
 	g_audioSystem = this;
 
-	if (!config.enabled) {
+	if (!isEnabled_) {
 		return true;
 	}
 
@@ -164,11 +149,11 @@ bool AudioSystem::Initialize(
 		g_audioSystem = nullptr;
 		return false;
 	}
-	impl_->isMediaFoundationStarted = true;
+	isMediaFoundationStarted_ = true;
 
-	if (FAILED(XAudio2Create(&impl_->audioEngine)) ||
-		FAILED(impl_->audioEngine->CreateMasteringVoice(&impl_->masteringVoice)) ||
-		FAILED(impl_->masteringVoice->SetVolume(config.masterVolume))) {
+	if (FAILED(XAudio2Create(&audioEngine_)) ||
+		FAILED(audioEngine_->CreateMasteringVoice(&masteringVoice_)) ||
+		FAILED(masteringVoice_->SetVolume(config.masterVolume))) {
 		Finalize();
 		return false;
 	}
@@ -178,32 +163,32 @@ bool AudioSystem::Initialize(
 bool AudioSystem::Finalize() {
 	g_audioSystem = nullptr;
 
-	for (const std::weak_ptr<AudioDetail::AudioData>& weakData : impl_->audioData) {
+	for (const std::weak_ptr<AudioDetail::AudioData>& weakData : audioData_) {
 		if (const std::shared_ptr<AudioDetail::AudioData> data = weakData.lock()) {
 			data->Reset();
 		}
 	}
-	impl_->audioData.clear();
-	impl_->loadedAudio.clear();
+	audioData_.clear();
+	loadedAudio_.clear();
 
-	if (impl_->masteringVoice != nullptr) {
-		impl_->masteringVoice->DestroyVoice();
-		impl_->masteringVoice = nullptr;
+	if (masteringVoice_ != nullptr) {
+		masteringVoice_->DestroyVoice();
+		masteringVoice_ = nullptr;
 	}
-	impl_->audioEngine.Reset();
+	audioEngine_.Reset();
 
 	bool succeeded = true;
-	if (impl_->isMediaFoundationStarted) {
+	if (isMediaFoundationStarted_) {
 		succeeded = SUCCEEDED(MFShutdown());
-		impl_->isMediaFoundationStarted = false;
+		isMediaFoundationStarted_ = false;
 	}
-	impl_->enabled = false;
+	isEnabled_ = false;
 	return succeeded;
 }
 
 std::shared_ptr<AudioDetail::AudioData> AudioSystem::Create(
 	const std::filesystem::path& filePath) {
-	if (!impl_->enabled || !impl_->audioEngine || filePath.empty()) {
+	if (!isEnabled_ || !audioEngine_ || filePath.empty()) {
 		return {};
 	}
 
@@ -213,17 +198,18 @@ std::shared_ptr<AudioDetail::AudioData> AudioSystem::Create(
 		return {};
 	}
 
-	auto data = std::make_shared<AudioDetail::AudioData>(
-		*impl_->audioEngine.Get(),
-		std::move(decodedAudio.waveFormat),
-		std::move(decodedAudio.samples));
+	std::shared_ptr<AudioDetail::AudioData> data =
+		std::make_shared<AudioDetail::AudioData>(
+			*audioEngine_.Get(),
+			std::move(decodedAudio.waveFormat),
+			std::move(decodedAudio.samples));
 	if (!data->IsValid()) {
 		return {};
 	}
-	std::erase_if(impl_->audioData, [](const auto& weakData) {
+	std::erase_if(audioData_, [](const auto& weakData) {
 		return weakData.expired();
 	});
-	impl_->audioData.emplace_back(data);
+	audioData_.emplace_back(data);
 	return data;
 }
 
@@ -232,18 +218,18 @@ bool AudioSystem::Load(const std::filesystem::path& filePath) {
 	if (!data) {
 		return false;
 	}
-	impl_->loadedAudio.insert_or_assign(
+	loadedAudio_.insert_or_assign(
 		ResolvePath(filePath).native(),
 		std::move(data));
 	return true;
 }
 
 bool AudioSystem::Unload(const std::filesystem::path& filePath) {
-	return impl_->loadedAudio.erase(ResolvePath(filePath).native()) > 0u;
+	return loadedAudio_.erase(ResolvePath(filePath).native()) > 0u;
 }
 
 void AudioSystem::UnloadAll() {
-	impl_->loadedAudio.clear();
+	loadedAudio_.clear();
 }
 
 bool AudioSystem::IsLoaded(const std::filesystem::path& filePath) const {
@@ -282,8 +268,8 @@ std::shared_ptr<AudioDetail::AudioData> AudioSystem::Find(
 	if (filePath.empty()) {
 		return {};
 	}
-	const auto iterator = impl_->loadedAudio.find(ResolvePath(filePath).native());
-	return iterator != impl_->loadedAudio.end() ? iterator->second : nullptr;
+	const auto iterator = loadedAudio_.find(ResolvePath(filePath).native());
+	return iterator != loadedAudio_.end() ? iterator->second : nullptr;
 }
 
 std::filesystem::path AudioSystem::ResolvePath(
@@ -293,7 +279,7 @@ std::filesystem::path AudioSystem::ResolvePath(
 	}
 	return filePath.is_absolute()
 		? filePath.lexically_normal()
-		: (impl_->assetRoot / filePath).lexically_normal();
+		: (assetRoot_ / filePath).lexically_normal();
 }
 
 std::shared_ptr<AudioDetail::AudioData> LGF::AudioDetail::Create(
