@@ -9,6 +9,70 @@
 
 最初はCPUでシミュレーションを実装し、公開APIを変えずにGPUシミュレーションへ移行できる構造を目指す。
 
+Effekseerの組み込みは別機能として後から行う。このParticleWorldはエンジン独自の
+軽量なVFXを担当し、Effekseerファイルの解釈や互換性を実装しない。
+
+## CPU初期実装で確定した仕様
+
+公開定義は`Project/Include/LGF/VFX/Particle/ParticleWorld.h`を正とする。
+以下の仮APIは設計時の責務説明として残している。
+
+### World設定
+
+| 項目 | 既定値 | 意味 |
+| --- | --- | --- |
+| worldBounds | 各軸-100～100 | 粒子中心を判定するワールド座標のAABB |
+| maximumParticleCount | 10000 | World全体の固定粒子容量 |
+| maximumEmitterCount | 256 | Emitter数の上限 |
+| boundsPadding | 0 | AABBの各面へ加算する余白 |
+| removeOutOfBounds | true | 範囲外粒子の回収を有効にする |
+| maximumDeltaTime | 1/15秒 | 1回の更新時間の上限。超過時間は捨てる |
+| randomSeed | 1 | World内で使用する乱数シード |
+
+容量不足では新しい粒子を拒否し、次フレームへ持ち越さない。
+Emitterはスロット順に生成するため、上限付近での公平な割り当ては行わない。
+設定はWorld生成時に確定し、実行中の容量変更は提供しない。
+
+### Emitter設定
+
+- `position`: Point Emitterのワールド座標。
+- `minimumVelocity` / `maximumVelocity`: 各軸で独立に一様抽選する初速度。
+- `acceleration`: 生成した粒子に適用する一定加速度。
+- `minimumLifetime` / `maximumLifetime`: 寿命の一様抽選範囲。単位は秒、0より大きい値。
+- `startColor` / `endColor`: 寿命に対して線形補間するRGBA。RGBはHDR値を許容する。
+- `startSize` / `endSize`: 寿命に対して線形補間する幅と高さ。ワールド単位、非負値。
+- `minimumRotation` / `maximumRotation`: 板の初期回転の抽選範囲。単位はラジアン。
+- `minimumAngularVelocity` / `maximumAngularVelocity`: 角速度の抽選範囲。ラジアン/秒。
+- `emissionRate`: 1秒あたりの連続生成数。小数の余りを次の更新へ持ち越す。0で連続生成なし。
+- `enabled`: 連続生成の有効・無効。明示的な`Emit`には影響しない。
+- `texture`: 2Dのカラーテクスチャ。空の場合は単色の板を描画する。
+
+設定の変更は生成済み粒子に影響しない。`SetEmitterDesc`では連続生成の小数余りを
+リセットする。`SetEmitterEnabled`では余りを維持する。
+`Emit`は要求数をEmitterに蓄積し、次の`Update`時点の設定で生成する。
+Emitter削除時は未処理の要求を破棄し、生成済み粒子は寿命まで残す。
+
+### ハンドル・更新・描画
+
+- ハンドルは`index`・`generation`・`worldId`を持つ。Worldのコピーとムーブは不可。
+- `Clear`ですべてのハンドルを無効化し、乱数シードも初期化する。
+- 負数・非有限値の更新時間は無視する。`Update(0)`は生成要求と範囲判定だけを処理できる。
+- 生成後に更新するため、新しい粒子もその更新のdeltaTimeだけ進む。サブフレーム生成は将来対応。
+- 初速度と一定加速度から位置を更新し、寿命切れと範囲外を同じフリーリストへ回収する。
+- Rendererは4096枚単位のページを必要に応じて追加し、複数Worldの描画を蓄積する。
+- 既存のbindless textureを使うため、加算描画ではテクスチャごとにバッチを分割しない。
+- SceneColorへのライティング後、トーンマッピング前に描画する。深度判定あり、深度書き込みなし。
+- `DrawDebug`はAABBとWorld別統計を表示する。生成・拒否・寿命切れ・範囲外数は直前の更新値。
+
+### JSON設定
+
+`LoadParticleWorldSettings(path)` / `LoadParticleEmitterDesc(path)`で、既存の
+`ParameterDocument`形式を読み込む。パスはカレントディレクトリ基準。
+省略項目は既定値、型不一致や読み込み失敗は例外。値域はWorld生成・Emitter登録時に検証する。
+JSONの整数は既存エディターに合わせて非負のInt32とし、C++側ではuint32_tを使用する。
+`Texture`は既存の`Texture`と同じパス解決を使用し、空文字ならテクスチャなし。
+既存のParameter Editorから編集できる。自動リロードは行わない。
+
 ## 配置と依存関係
 
 - 公開API: `Project/Include/LGF/VFX/Particle/`
@@ -143,7 +207,8 @@ Worldごとに異なる`worldBounds`を指定できるようにする。
 
 ## 描画
 
-初期実装ではビルボードを使用し、テクスチャ、ブレンドモード、描画方式ごとにバッチを分ける。
+初期実装ではビルボードと加算合成を使用する。テクスチャはbindlessで選択し、
+バッファページ単位でまとめて描画する。ブレンドモードや描画方式を増やす際にバッチを分ける。
 
 3Dパーティクルはライティング後、シーンカラーをSwapChainへ合成する前に描画する。
 加算合成を最初に対応し、必要に応じて通常のアルファ合成へ広げる。
@@ -226,11 +291,10 @@ Compute Shaderで更新と生成を行い、生存粒子を次フレーム用バ
 - Worldごとに異なるAABBを使用できる。
 - Emitterを範囲外へ置いても処理が破綻しない。
 
-## 実装開始時に決める項目
+## 今後の拡張
 
-- `ParticleEmitterDesc`へ最初から含めるパラメータ
-- Emitterの所有Worldを検証する方法
-- 上限到達時に古い粒子を消すか、新しい生成を拒否するか
-- 透明パーティクルの描画順とソート方針
-- `DrawDebug()`をRuntimeとGraphicsのどちらから提供するか
-- 乱数シードをWorld単位、Emitter単位のどちらで持つか
+- 高品質な通常アルファ合成とソート。
+- 連続生成タイミングのサブフレーム精度。
+- Sphere / Box / Cone Emitterやカーブによる色・サイズ変化。
+- GPUバックエンド。公開APIから個別粒子を参照させない方針を維持する。
+- Effekseerは独立したEffectWorld等で対応し、この生成規則に変換しない。
