@@ -28,6 +28,7 @@ namespace LGF {
 	private:
 		std::filesystem::path ResolvePath(const std::filesystem::path& filePath) const;
 
+	private:
 		std::filesystem::path assetRoot_;
 		Microsoft::WRL::ComPtr<IXAudio2> audioEngine_;
 		IXAudio2MasteringVoice* masteringVoice_ = nullptr;
