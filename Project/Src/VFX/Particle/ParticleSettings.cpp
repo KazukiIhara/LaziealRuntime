@@ -77,7 +77,9 @@ namespace LGF::VFX {
 		Read(document, "Texture", texturePath);
 		if (!texturePath.empty()) {
 			// テクスチャは既存のTextureと同じパス解決を使用する。
-			desc.texture = Texture{ texturePath, TextureLoadDesc::Color() };
+			const std::filesystem::path path(
+				std::u8string(texturePath.begin(), texturePath.end()));
+			desc.texture = Texture{ path, TextureLoadDesc::Color() };
 		}
 		return desc;
 	}
