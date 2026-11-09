@@ -125,9 +125,21 @@ namespace LGF::Collision {
 	}
 
 	ColliderHandle ColliderWorld::Add(
+		const OBB& box,
+		const ColliderOptions& options) {
+		return Add(ColliderShape{ box }, options);
+	}
+
+	ColliderHandle ColliderWorld::Add(
 		const Capsule& capsule,
 		const ColliderOptions& options) {
 		return Add(ColliderShape{ capsule }, options);
+	}
+
+	ColliderHandle ColliderWorld::Add(
+		const Plane& plane,
+		const ColliderOptions& options) {
+		return Add(ColliderShape{ plane }, options);
 	}
 
 	bool ColliderWorld::Remove(ColliderHandle handle) {
@@ -201,8 +213,16 @@ namespace LGF::Collision {
 		return SetShape(handle, ColliderShape{ box });
 	}
 
+	bool ColliderWorld::SetShape(ColliderHandle handle, const OBB& box) {
+		return SetShape(handle, ColliderShape{ box });
+	}
+
 	bool ColliderWorld::SetShape(ColliderHandle handle, const Capsule& capsule) {
 		return SetShape(handle, ColliderShape{ capsule });
+	}
+
+	bool ColliderWorld::SetShape(ColliderHandle handle, const Plane& plane) {
+		return SetShape(handle, ColliderShape{ plane });
 	}
 
 	bool ColliderWorld::SetTag(ColliderHandle handle, const CollisionTag& tag) {

@@ -55,12 +55,25 @@ namespace LGF::Collision {
 	std::optional<Contact> Collide(const Sphere& sphere, const OBB& box);
 	std::optional<Contact> Collide(const OBB& box, const Sphere& sphere);
 	std::optional<Contact> Collide(const AABB& first, const AABB& second);
+	std::optional<Contact> Collide(const AABB& first, const OBB& second);
+	std::optional<Contact> Collide(const OBB& first, const AABB& second);
 	std::optional<Contact> Collide(const OBB& first, const OBB& second);
 	std::optional<Contact> Collide(const Capsule& capsule, const Sphere& sphere);
 	std::optional<Contact> Collide(const Sphere& sphere, const Capsule& capsule);
 	std::optional<Contact> Collide(const Capsule& capsule, const AABB& box);
 	std::optional<Contact> Collide(const AABB& box, const Capsule& capsule);
+	std::optional<Contact> Collide(const Capsule& capsule, const OBB& box);
+	std::optional<Contact> Collide(const OBB& box, const Capsule& capsule);
 	std::optional<Contact> Collide(const Capsule& first, const Capsule& second);
+	std::optional<Contact> Collide(const Sphere& sphere, const Plane& plane);
+	std::optional<Contact> Collide(const Plane& plane, const Sphere& sphere);
+	std::optional<Contact> Collide(const AABB& box, const Plane& plane);
+	std::optional<Contact> Collide(const Plane& plane, const AABB& box);
+	std::optional<Contact> Collide(const OBB& box, const Plane& plane);
+	std::optional<Contact> Collide(const Plane& plane, const OBB& box);
+	std::optional<Contact> Collide(const Capsule& capsule, const Plane& plane);
+	std::optional<Contact> Collide(const Plane& plane, const Capsule& capsule);
+	std::optional<Contact> Collide(const Plane& first, const Plane& second);
 
 	bool Intersects(const Sphere& first, const Sphere& second);
 	bool Intersects(const Sphere& sphere, const SphericalCap& sphericalCap);
@@ -72,12 +85,25 @@ namespace LGF::Collision {
 	bool Intersects(const Sphere& sphere, const OBB& box);
 	bool Intersects(const OBB& box, const Sphere& sphere);
 	bool Intersects(const AABB& first, const AABB& second);
+	bool Intersects(const AABB& first, const OBB& second);
+	bool Intersects(const OBB& first, const AABB& second);
 	bool Intersects(const OBB& first, const OBB& second);
 	bool Intersects(const Capsule& capsule, const Sphere& sphere);
 	bool Intersects(const Sphere& sphere, const Capsule& capsule);
 	bool Intersects(const Capsule& capsule, const AABB& box);
 	bool Intersects(const AABB& box, const Capsule& capsule);
+	bool Intersects(const Capsule& capsule, const OBB& box);
+	bool Intersects(const OBB& box, const Capsule& capsule);
 	bool Intersects(const Capsule& first, const Capsule& second);
+	bool Intersects(const Sphere& sphere, const Plane& plane);
+	bool Intersects(const Plane& plane, const Sphere& sphere);
+	bool Intersects(const AABB& box, const Plane& plane);
+	bool Intersects(const Plane& plane, const AABB& box);
+	bool Intersects(const OBB& box, const Plane& plane);
+	bool Intersects(const Plane& plane, const OBB& box);
+	bool Intersects(const Capsule& capsule, const Plane& plane);
+	bool Intersects(const Plane& plane, const Capsule& capsule);
+	bool Intersects(const Plane& first, const Plane& second);
 
 	std::optional<RaycastHit> Raycast(
 		const Ray& ray,

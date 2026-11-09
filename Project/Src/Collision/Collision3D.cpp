@@ -115,6 +115,30 @@ namespace {
 		return result;
 	}
 
+	LGF::Collision::OBB ToOBB(const LGF::Collision::AABB& box) {
+		return {
+			.center = (box.min + box.max) * 0.5f,
+			.halfExtents = (box.max - box.min) * 0.5f,
+		};
+	}
+
+	struct PlaneGeometry {
+		Vector3 normal{};
+		float distance{};
+	};
+
+	PlaneGeometry MakeGeometry(const LGF::Collision::Plane& plane) {
+		const float normalLength = Math::Length(plane.normal);
+		return {
+			.normal = plane.normal / normalLength,
+			.distance = plane.distance / normalLength,
+		};
+	}
+
+	float SignedDistance(const Vector3& point, const PlaneGeometry& plane) {
+		return Math::Dot(plane.normal, point) + plane.distance;
+	}
+
 	struct SphericalShellCapGeometry {
 		Vector3 axis{};
 		Vector3 sphereCenter{};
@@ -798,6 +822,14 @@ namespace LGF::Collision {
 		};
 	}
 
+	std::optional<Contact> Collide(const AABB& first, const OBB& second) {
+		return Collide(ToOBB(first), second);
+	}
+
+	std::optional<Contact> Collide(const OBB& first, const AABB& second) {
+		return Collide(first, ToOBB(second));
+	}
+
 	std::optional<Contact> Collide(const OBB& first, const OBB& second) {
 		if (!IsValid(first) || !IsValid(second)) {
 			return std::nullopt;
@@ -943,6 +975,38 @@ namespace LGF::Collision {
 		return contact ? std::optional<Contact>(ReverseContact(*contact)) : std::nullopt;
 	}
 
+	std::optional<Contact> Collide(const Capsule& capsule, const OBB& box) {
+		if (!IsValid(capsule) || !IsValid(box)) {
+			return std::nullopt;
+		}
+
+		const OBBAxes axes = GetAxes(box);
+		const Capsule localCapsule{
+			.start = ToLocalDirection(capsule.start - box.center, axes),
+			.end = ToLocalDirection(capsule.end - box.center, axes),
+			.radius = capsule.radius,
+		};
+		const AABB localBox{
+			.min = -box.halfExtents,
+			.max = box.halfExtents,
+		};
+		const std::optional<Contact> localContact = Collide(localCapsule, localBox);
+		if (!localContact) {
+			return std::nullopt;
+		}
+
+		return Contact{
+			.point = box.center + ToWorldDirection(localContact->point, axes),
+			.normal = ToWorldDirection(localContact->normal, axes),
+			.penetrationDepth = localContact->penetrationDepth,
+		};
+	}
+
+	std::optional<Contact> Collide(const OBB& box, const Capsule& capsule) {
+		const std::optional<Contact> contact = Collide(capsule, box);
+		return contact ? std::optional<Contact>(ReverseContact(*contact)) : std::nullopt;
+	}
+
 	std::optional<Contact> Collide(const Capsule& first, const Capsule& second) {
 		if (!IsValid(first) || !IsValid(second)) {
 			return std::nullopt;
@@ -971,6 +1035,124 @@ namespace LGF::Collision {
 			.normal = normal,
 			.penetrationDepth = penetrationDepth,
 		};
+	}
+
+	std::optional<Contact> Collide(const Sphere& sphere, const Plane& plane) {
+		if (!IsValid(sphere) || !IsValid(plane)) {
+			return std::nullopt;
+		}
+
+		const PlaneGeometry geometry = MakeGeometry(plane);
+		const float signedDistance = SignedDistance(sphere.center, geometry);
+		const float absoluteDistance = std::abs(signedDistance);
+		if (absoluteDistance > sphere.radius) {
+			return std::nullopt;
+		}
+
+		return Contact{
+			.point = sphere.center - geometry.normal * signedDistance,
+			.normal = signedDistance >= 0.0f ? -geometry.normal : geometry.normal,
+			.penetrationDepth = sphere.radius - absoluteDistance,
+		};
+	}
+
+	std::optional<Contact> Collide(const Plane& plane, const Sphere& sphere) {
+		const std::optional<Contact> contact = Collide(sphere, plane);
+		return contact ? std::optional<Contact>(ReverseContact(*contact)) : std::nullopt;
+	}
+
+	std::optional<Contact> Collide(const AABB& box, const Plane& plane) {
+		return Collide(ToOBB(box), plane);
+	}
+
+	std::optional<Contact> Collide(const Plane& plane, const AABB& box) {
+		const std::optional<Contact> contact = Collide(box, plane);
+		return contact ? std::optional<Contact>(ReverseContact(*contact)) : std::nullopt;
+	}
+
+	std::optional<Contact> Collide(const OBB& box, const Plane& plane) {
+		if (!IsValid(box) || !IsValid(plane)) {
+			return std::nullopt;
+		}
+
+		const OBBAxes axes = GetAxes(box);
+		const PlaneGeometry geometry = MakeGeometry(plane);
+		const float projectionRadius = CalculateProjectionRadius(
+			box,
+			axes,
+			geometry.normal);
+		const float signedDistance = SignedDistance(box.center, geometry);
+		const float absoluteDistance = std::abs(signedDistance);
+		if (absoluteDistance > projectionRadius) {
+			return std::nullopt;
+		}
+
+		const Vector3 normal = signedDistance >= 0.0f
+			? -geometry.normal
+			: geometry.normal;
+		const Vector3 supportPoint = SupportPoint(box, axes, normal);
+		return Contact{
+			.point = supportPoint - geometry.normal *
+				SignedDistance(supportPoint, geometry),
+			.normal = normal,
+			.penetrationDepth = projectionRadius - absoluteDistance,
+		};
+	}
+
+	std::optional<Contact> Collide(const Plane& plane, const OBB& box) {
+		const std::optional<Contact> contact = Collide(box, plane);
+		return contact ? std::optional<Contact>(ReverseContact(*contact)) : std::nullopt;
+	}
+
+	std::optional<Contact> Collide(const Capsule& capsule, const Plane& plane) {
+		if (!IsValid(capsule) || !IsValid(plane)) {
+			return std::nullopt;
+		}
+
+		const PlaneGeometry geometry = MakeGeometry(plane);
+		const float startDistance = SignedDistance(capsule.start, geometry);
+		const float endDistance = SignedDistance(capsule.end, geometry);
+		const float minimumDistance = std::min(startDistance, endDistance);
+		const float maximumDistance = std::max(startDistance, endDistance);
+		if (minimumDistance > capsule.radius || maximumDistance < -capsule.radius) {
+			return std::nullopt;
+		}
+
+		Vector3 closestAxisPoint{};
+		if (startDistance * endDistance <= 0.0f) {
+			const float denominator = startDistance - endDistance;
+			const float interpolation = std::abs(denominator) > Math::EPSILON
+				? startDistance / denominator
+				: 0.0f;
+			closestAxisPoint = capsule.start +
+				(capsule.end - capsule.start) * interpolation;
+		} else {
+			closestAxisPoint = std::abs(startDistance) <= std::abs(endDistance)
+				? capsule.start
+				: capsule.end;
+		}
+
+		const float moveToPositive = capsule.radius - minimumDistance;
+		const float moveToNegative = capsule.radius + maximumDistance;
+		const bool separateToPositive = moveToPositive <= moveToNegative;
+		const float axisDistance = SignedDistance(closestAxisPoint, geometry);
+		return Contact{
+			.point = closestAxisPoint - geometry.normal * axisDistance,
+			.normal = separateToPositive ? -geometry.normal : geometry.normal,
+			.penetrationDepth = separateToPositive
+				? moveToPositive
+				: moveToNegative,
+		};
+	}
+
+	std::optional<Contact> Collide(const Plane& plane, const Capsule& capsule) {
+		const std::optional<Contact> contact = Collide(capsule, plane);
+		return contact ? std::optional<Contact>(ReverseContact(*contact)) : std::nullopt;
+	}
+
+	std::optional<Contact> Collide(const Plane&, const Plane&) {
+		// 無限平面同士は有限の接触点と押し出し量を定義できない。
+		return std::nullopt;
 	}
 
 	bool Intersects(const Sphere& first, const Sphere& second) {
@@ -1013,6 +1195,14 @@ namespace LGF::Collision {
 		return Collide(first, second).has_value();
 	}
 
+	bool Intersects(const AABB& first, const OBB& second) {
+		return Collide(first, second).has_value();
+	}
+
+	bool Intersects(const OBB& first, const AABB& second) {
+		return Collide(first, second).has_value();
+	}
+
 	bool Intersects(const OBB& first, const OBB& second) {
 		return Collide(first, second).has_value();
 	}
@@ -1033,8 +1223,52 @@ namespace LGF::Collision {
 		return Intersects(capsule, box);
 	}
 
+	bool Intersects(const Capsule& capsule, const OBB& box) {
+		return Collide(capsule, box).has_value();
+	}
+
+	bool Intersects(const OBB& box, const Capsule& capsule) {
+		return Intersects(capsule, box);
+	}
+
 	bool Intersects(const Capsule& first, const Capsule& second) {
 		return Collide(first, second).has_value();
+	}
+
+	bool Intersects(const Sphere& sphere, const Plane& plane) {
+		return Collide(sphere, plane).has_value();
+	}
+
+	bool Intersects(const Plane& plane, const Sphere& sphere) {
+		return Intersects(sphere, plane);
+	}
+
+	bool Intersects(const AABB& box, const Plane& plane) {
+		return Collide(box, plane).has_value();
+	}
+
+	bool Intersects(const Plane& plane, const AABB& box) {
+		return Intersects(box, plane);
+	}
+
+	bool Intersects(const OBB& box, const Plane& plane) {
+		return Collide(box, plane).has_value();
+	}
+
+	bool Intersects(const Plane& plane, const OBB& box) {
+		return Intersects(box, plane);
+	}
+
+	bool Intersects(const Capsule& capsule, const Plane& plane) {
+		return Collide(capsule, plane).has_value();
+	}
+
+	bool Intersects(const Plane& plane, const Capsule& capsule) {
+		return Intersects(capsule, plane);
+	}
+
+	bool Intersects(const Plane&, const Plane&) {
+		return false;
 	}
 
 	std::optional<RaycastHit> Raycast(

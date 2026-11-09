@@ -14,7 +14,7 @@
 
 namespace LGF::Collision {
 
-	using ColliderShape = std::variant<Sphere, AABB, Capsule>;
+	using ColliderShape = std::variant<Sphere, AABB, OBB, Capsule, Plane>;
 	using CollisionTag = std::string;
 	using CollisionTagList = std::vector<CollisionTag>;
 
@@ -131,7 +131,13 @@ namespace LGF::Collision {
 			const AABB& box,
 			const ColliderOptions& options = {});
 		ColliderHandle Add(
+			const OBB& box,
+			const ColliderOptions& options = {});
+		ColliderHandle Add(
 			const Capsule& capsule,
+			const ColliderOptions& options = {});
+		ColliderHandle Add(
+			const Plane& plane,
 			const ColliderOptions& options = {});
 
 		bool Remove(ColliderHandle handle);
@@ -144,7 +150,9 @@ namespace LGF::Collision {
 		bool SetShape(ColliderHandle handle, const ColliderShape& shape);
 		bool SetShape(ColliderHandle handle, const Sphere& sphere);
 		bool SetShape(ColliderHandle handle, const AABB& box);
+		bool SetShape(ColliderHandle handle, const OBB& box);
 		bool SetShape(ColliderHandle handle, const Capsule& capsule);
+		bool SetShape(ColliderHandle handle, const Plane& plane);
 		bool SetTag(ColliderHandle handle, const CollisionTag& tag);
 		/// <summary>衝突イベントを受け取る相手のタグを設定する</summary>
 		bool SetTargetTags(
