@@ -151,6 +151,7 @@ public:
 		}
 
 		(void)SDL_SetHint(SDL_HINT_JOYSTICK_HIDAPI_JOY_CONS, "1");
+		(void)SDL_SetHint(SDL_HINT_JOYSTICK_ENHANCED_REPORTS, "0");
 		(void)SDL_SetHint(
 			SDL_HINT_JOYSTICK_HIDAPI_COMBINE_JOY_CONS,
 			config.combineJoyCons ? "1" : "0");
