@@ -2,6 +2,7 @@
 
 #include "LGF/Collision/Shapes3D.h"
 #include "LGF/Graphics/Texture.h"
+#include "LGF/Graphics/GpuParticle3D.h"
 #include "LGF/Math/MathTypes.h"
 
 #include <cstddef>
@@ -70,6 +71,9 @@ namespace LGF::VFX {
 		uint64_t rejectedCount{};
 		uint32_t expiredCount{};
 		uint32_t outOfBoundsCount{};
+		// GPU版では完了済みFrameContextから取得した値の遅延フレーム数。
+		uint32_t latencyFrames{};
+		bool isAvailable = true;
 	};
 
 	// ParameterDocument形式のJSONを読む。省略項目は既定値、型の不一致は例外とする。
@@ -99,7 +103,8 @@ namespace LGF::VFX {
 			float angularVelocity{};
 			float age{};
 			float lifetime{};
-			Texture texture{};
+			// Texture本体を粒子ごとに複製せず、World内の共有テーブルを参照する。
+			uint32_t textureIndex = ParticleEmitterHandle::InvalidIndex;
 		};
 
 	public:
@@ -134,6 +139,7 @@ namespace LGF::VFX {
 		const EmitterSlot* FindEmitter(ParticleEmitterHandle handle) const;
 		void GenerateParticles(const ParticleEmitterDesc& desc, uint64_t count);
 		void RemoveParticleAt(std::size_t activeIndex);
+		uint32_t FindOrCreateTextureIndex(const Texture& texture);
 		float Random(float minimum, float maximum);
 
 	private:
@@ -145,8 +151,62 @@ namespace LGF::VFX {
 		std::vector<ParticleSlot> particles_;
 		std::vector<uint32_t> freeParticleIndices_;
 		std::vector<uint32_t> activeParticleIndices_;
+		std::vector<Texture> particleTextures_;
 		uint32_t emitterCount_{};
 		ParticleStepStatistics lastStepStatistics_{};
+	};
+
+	// Compute Shaderで生成・更新・破棄を行うGPU Particleの試作World。
+	// Emitter操作はCPU版と揃え、統計だけはGPUを待たずに遅延スナップショットを返す。
+	class GpuParticleWorld {
+	private:
+		struct EmitterSlot {
+			ParticleEmitterDesc desc{};
+			double emissionRemainder{};
+			uint64_t pendingCount{};
+			uint32_t generation = 1u;
+			bool isOccupied{};
+		};
+
+	public:
+		explicit GpuParticleWorld(const ParticleWorldSettings& settings = {});
+		~GpuParticleWorld();
+		GpuParticleWorld(const GpuParticleWorld&) = delete;
+		GpuParticleWorld& operator=(const GpuParticleWorld&) = delete;
+		GpuParticleWorld(GpuParticleWorld&&) = delete;
+		GpuParticleWorld& operator=(GpuParticleWorld&&) = delete;
+
+		ParticleEmitterHandle CreateEmitter(const ParticleEmitterDesc& desc = {});
+		bool RemoveEmitter(ParticleEmitterHandle handle);
+		bool IsValid(ParticleEmitterHandle handle) const;
+		bool SetEmitterDesc(ParticleEmitterHandle handle, const ParticleEmitterDesc& desc);
+		bool SetEmitterPosition(ParticleEmitterHandle handle, const Vector3& position);
+		bool SetEmitterEnabled(ParticleEmitterHandle handle, bool enabled);
+		std::optional<ParticleEmitterDesc> GetEmitterDesc(ParticleEmitterHandle handle) const;
+		bool Emit(ParticleEmitterHandle handle, uint32_t count);
+
+		void Update(float deltaTime);
+		void Draw() const;
+		void DrawDebug() const;
+		void Clear();
+		std::size_t GetParticleCount() const;
+		std::size_t GetEmitterCount() const;
+		const ParticleWorldSettings& GetSettings() const;
+		const ParticleStepStatistics& GetLatestStatistics() const;
+
+	private:
+		EmitterSlot* FindEmitter(ParticleEmitterHandle handle);
+		const EmitterSlot* FindEmitter(ParticleEmitterHandle handle) const;
+
+	private:
+		ParticleWorldSettings settings_;
+		uint64_t worldId_{};
+		GpuParticleWorldHandle graphicsHandle_{};
+		std::mt19937 random_;
+		std::vector<EmitterSlot> emitters_;
+		std::vector<uint32_t> freeEmitterIndices_;
+		uint32_t emitterCount_{};
+		ParticleStepStatistics latestStatistics_{ .isAvailable = false };
 	};
 
 }

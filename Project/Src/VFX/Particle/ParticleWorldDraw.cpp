@@ -14,7 +14,13 @@ namespace LGF::VFX {
 			const float t = particle.age / particle.lifetime;
 			const Vector4 color = particle.startColor * (1.0f - t) + particle.endColor * t;
 			const Vector2 size = particle.startSize * (1.0f - t) + particle.endSize * t;
-			Billboard3D{ particle.position, size, particle.rotation }.Draw(color, particle.texture);
+			const Billboard3D billboard{ particle.position, size, particle.rotation };
+			if (particle.textureIndex == ParticleEmitterHandle::InvalidIndex) {
+				billboard.Draw(color);
+			}
+			else {
+				billboard.Draw(color, particleTextures_[particle.textureIndex]);
+			}
 		}
 	}
 

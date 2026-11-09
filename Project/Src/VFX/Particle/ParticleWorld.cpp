@@ -209,9 +209,10 @@ namespace LGF::VFX {
 		activeParticleIndices_.clear();
 		freeParticleIndices_.clear();
 		for (uint32_t i = settings_.maximumParticleCount; i > 0u; --i) {
-			particles_[i - 1u].texture = {};
+			particles_[i - 1u].textureIndex = ParticleEmitterHandle::InvalidIndex;
 			freeParticleIndices_.push_back(i - 1u);
 		}
+		particleTextures_.clear();
 		freeEmitterIndices_.clear();
 		for (uint32_t i = 0u; i < emitters_.size(); ++i) {
 			EmitterSlot& emitter = emitters_[i];
@@ -249,6 +250,12 @@ namespace LGF::VFX {
 		const uint64_t rejected = count - accepted;
 		lastStepStatistics_.rejectedCount += std::min(rejected,
 			std::numeric_limits<uint64_t>::max() - lastStepStatistics_.rejectedCount);
+		if (accepted == 0u) {
+			return;
+		}
+		// 同じEmitterから生成する粒子は、World内で1つのTextureを共有する。
+		// Emitter設定が後から変わっても、生成済み粒子は当時のIndexを保持する。
+		const uint32_t textureIndex = FindOrCreateTextureIndex(desc.texture);
 		for (uint32_t i = 0u; i < accepted; ++i) {
 			const uint32_t index = freeParticleIndices_.back();
 			freeParticleIndices_.pop_back();
@@ -268,17 +275,29 @@ namespace LGF::VFX {
 			particle.angularVelocity = Random(desc.minimumAngularVelocity, desc.maximumAngularVelocity);
 			particle.age = 0.0f;
 			particle.lifetime = Random(desc.minimumLifetime, desc.maximumLifetime);
-			particle.texture = desc.texture;
+			particle.textureIndex = textureIndex;
 			activeParticleIndices_.push_back(index);
 		}
 	}
 
 	void ParticleWorld::RemoveParticleAt(std::size_t activeIndex) {
 		const uint32_t index = activeParticleIndices_[activeIndex];
-		particles_[index].texture = {};
+		particles_[index].textureIndex = ParticleEmitterHandle::InvalidIndex;
 		freeParticleIndices_.push_back(index);
 		activeParticleIndices_[activeIndex] = activeParticleIndices_.back();
 		activeParticleIndices_.pop_back();
+	}
+
+	uint32_t ParticleWorld::FindOrCreateTextureIndex(const Texture& texture) {
+		if (!texture.IsValid()) {
+			return ParticleEmitterHandle::InvalidIndex;
+		}
+		const auto found = std::find(particleTextures_.begin(), particleTextures_.end(), texture);
+		if (found != particleTextures_.end()) {
+			return static_cast<uint32_t>(std::distance(particleTextures_.begin(), found));
+		}
+		particleTextures_.push_back(texture);
+		return static_cast<uint32_t>(particleTextures_.size() - 1u);
 	}
 
 	float ParticleWorld::Random(float minimum, float maximum) {
