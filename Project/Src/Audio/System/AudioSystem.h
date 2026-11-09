@@ -1,4 +1,4 @@
-#pragma once
+ï»¿#pragma once
 
 #include <wrl/client.h>
 #include <xaudio2.h>
@@ -13,7 +13,7 @@ namespace LGF {
 	class AudioData;
 
 	/// <summary>
-	/// ‰¹ºÄ¶ƒVƒXƒeƒ€
+	/// éŸ³å£°å†ç”Ÿ
 	/// </summary>
 	class AudioSystem {
 	public:
