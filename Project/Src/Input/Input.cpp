@@ -20,6 +20,10 @@ uint32_t KeyButton::PressedFrames() const {
 	return Input::Internal::GetPressedFrames(code_);
 }
 
+KeyCode KeyButton::Code() const {
+	return code_;
+}
+
 bool MouseButton::Trigger() const {
 	return Input::Internal::IsTriggered(code_);
 }
@@ -36,6 +40,10 @@ uint32_t MouseButton::PressedFrames() const {
 	return Input::Internal::GetPressedFrames(code_);
 }
 
+MouseButtonCode MouseButton::Code() const {
+	return code_;
+}
+
 bool GamepadButton::Trigger() const {
 	return Input::Internal::IsTriggered(gamepadIndex_, code_);
 }
@@ -50,6 +58,14 @@ bool GamepadButton::Release() const {
 
 uint32_t GamepadButton::PressedFrames() const {
 	return Input::Internal::GetPressedFrames(gamepadIndex_, code_);
+}
+
+uint32_t GamepadButton::GamepadIndex() const {
+	return gamepadIndex_;
+}
+
+GamepadButtonCode GamepadButton::Code() const {
+	return code_;
 }
 
 bool Gamepad::IsConnected() const {

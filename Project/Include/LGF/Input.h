@@ -3,6 +3,9 @@
 #include <cstdint>
 #include <optional>
 #include <string>
+#include <string_view>
+#include <variant>
+#include <vector>
 
 #include "LGF/Math/Vector2.h"
 #include "LGF/Math/Vector3.h"
@@ -129,6 +132,8 @@ namespace LGF {
 		bool Press() const;
 		bool Release() const;
 		uint32_t PressedFrames() const;
+		KeyCode Code() const;
+		bool operator==(const KeyButton&) const = default;
 
 	private:
 		KeyCode code_;
@@ -144,6 +149,8 @@ namespace LGF {
 		bool Press() const;
 		bool Release() const;
 		uint32_t PressedFrames() const;
+		MouseButtonCode Code() const;
+		bool operator==(const MouseButton&) const = default;
 
 	private:
 		MouseButtonCode code_;
@@ -160,6 +167,9 @@ namespace LGF {
 		bool Press() const;
 		bool Release() const;
 		uint32_t PressedFrames() const;
+		uint32_t GamepadIndex() const;
+		GamepadButtonCode Code() const;
+		bool operator==(const GamepadButton&) const = default;
 
 	private:
 		uint32_t gamepadIndex_;
@@ -195,6 +205,44 @@ namespace LGF {
 	private:
 		uint32_t index_;
 	};
+
+	using InputBinding = std::variant<KeyButton, MouseButton, GamepadButton>;
+	using InputBindingList = std::vector<InputBinding>;
+
+	/// <summary>文字列で登録された入力コマンドを参照する。</summary>
+	class InputCommand {
+	public:
+		explicit InputCommand(std::string command);
+
+		bool Trigger() const;
+		bool Press() const;
+		bool Release() const;
+		const std::string& Name() const;
+
+	private:
+		std::string command_;
+	};
+
+	/// <summary>ゲーム内の操作とキーボード、マウス、ゲームパッド入力を関連付ける。</summary>
+	namespace Input {
+		bool RegisterCommand(
+			std::string_view command,
+			const InputBindingList& bindings = {});
+		bool UnregisterCommand(std::string_view command);
+		bool HasCommand(std::string_view command);
+		void ClearCommands();
+
+		bool SetBindings(
+			std::string_view command,
+			const InputBindingList& bindings);
+		bool AddBinding(std::string_view command, const InputBinding& binding);
+		bool RemoveBinding(std::string_view command, const InputBinding& binding);
+		InputBindingList GetBindings(std::string_view command);
+
+		bool Trigger(std::string_view command);
+		bool Press(std::string_view command);
+		bool Release(std::string_view command);
+	}
 
 	/// <summary>
 	/// 左右別々に接続されたJoy-Conを取得する。
