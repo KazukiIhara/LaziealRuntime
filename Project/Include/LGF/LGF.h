@@ -7,6 +7,7 @@
 #include "LGF/ObjectHandle.h"
 #include "LGF/Animation.h"
 #include "LGF/Input.h"
+#include "LGF/UI.h"
 #include "LGF/Audio.h"
 #include "LGF/Parameter.h"
 #include "LGF/Scene.h"
