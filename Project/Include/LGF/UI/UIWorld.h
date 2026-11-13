@@ -129,7 +129,7 @@ namespace LGF {
 	/// <summary>Buttonの配置、選択、入力をまとめて管理する。</summary>
 	class UIWorld {
 	private:
-		enum class ButtonSpace : uint8_t {
+		enum class ButtonSpace: uint8_t {
 			Screen,
 			World,
 		};
@@ -212,6 +212,7 @@ namespace LGF {
 		void MoveSelection(int32_t offset);
 		void InvalidateHandle(UIButtonHandle handle);
 
+	private:
 		std::vector<ButtonSlot> buttons_;
 		std::vector<UIButtonHandle> buttonOrder_;
 		UIButtonHandle selectedButton_{};
