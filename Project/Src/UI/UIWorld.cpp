@@ -48,7 +48,6 @@ UIButtonHandle UIWorld::AddButton(const UIButtonDesc& desc) {
 	slot.space = ButtonSpace::Screen;
 	slot.transform = desc.transform;
 	slot.transform3D = {};
-	slot.callbacks = desc.callbacks;
 	slot.draw = desc.draw;
 	slot.draw3D = {};
 	slot.isDirectPressed = desc.isDirectPressed;
@@ -87,7 +86,6 @@ UIButtonHandle UIWorld::AddButton3D(const UIButtonDesc3D& desc) {
 	slot.space = ButtonSpace::World;
 	slot.transform = {};
 	slot.transform3D = desc.transform;
-	slot.callbacks = desc.callbacks;
 	slot.draw = {};
 	slot.draw3D = desc.draw;
 	slot.isDirectPressed = desc.isDirectPressed;
@@ -118,7 +116,6 @@ bool UIWorld::RemoveButton(UIButtonHandle handle) {
 
 	slot->transform = {};
 	slot->transform3D = {};
-	slot->callbacks = {};
 	slot->draw = {};
 	slot->draw3D = {};
 	slot->isDirectPressed = {};
@@ -145,7 +142,6 @@ void UIWorld::Clear() {
 		}
 		slot.transform = {};
 		slot.transform3D = {};
-		slot.callbacks = {};
 		slot.draw = {};
 		slot.draw3D = {};
 		slot.isDirectPressed = {};
@@ -263,17 +259,6 @@ bool UIWorld::SetDirectInput(
 	return true;
 }
 
-bool UIWorld::SetCallbacks(
-	UIButtonHandle handle,
-	const UIButtonCallbacks& callbacks) {
-	ButtonSlot* slot = FindSlot(handle);
-	if (!slot) {
-		return false;
-	}
-	slot->callbacks = callbacks;
-	return true;
-}
-
 bool UIWorld::SetDrawCallback(
 	UIButtonHandle handle,
 	std::function<void(const UIButtonDrawContext&)> draw) {
@@ -315,6 +300,18 @@ std::optional<UIButtonState> UIWorld::GetButtonState(UIButtonHandle handle) cons
 	return slot ? std::optional<UIButtonState>{ slot->state } : std::nullopt;
 }
 
+UIButtonEvents UIWorld::GetEvents(UIButtonHandle handle) const {
+	const ButtonSlot* slot = FindSlot(handle);
+	if (!slot) {
+		return {};
+	}
+	return {
+		.triggered = slot->state.isTriggered,
+		.held = slot->state.isHeld,
+		.released = slot->state.isReleased,
+	};
+}
+
 std::optional<Rect2D> UIWorld::GetButtonRect(UIButtonHandle handle) const {
 	const ButtonSlot* slot = FindSlot(handle);
 	return slot && slot->space == ButtonSpace::Screen
@@ -352,7 +349,6 @@ void UIWorld::Update(const UIWorldInput& input) {
 		navigationCapturedButton_ = selectedButton_;
 	}
 
-	std::vector<PendingCallback> pendingCallbacks;
 	for (const UIButtonHandle handle : buttonOrder_) {
 		ButtonSlot* slot = FindSlot(handle);
 		if (!slot) {
@@ -382,15 +378,6 @@ void UIWorld::Update(const UIWorldInput& input) {
 		state.isTriggered = state.isHeld && !wasHeld;
 		state.isReleased = !state.isHeld && wasHeld;
 
-		if (state.isTriggered) {
-			pendingCallbacks.push_back({ handle, CallbackType::Trigger });
-		}
-		if (state.isHeld) {
-			pendingCallbacks.push_back({ handle, CallbackType::Hold });
-		}
-		if (state.isReleased) {
-			pendingCallbacks.push_back({ handle, CallbackType::Release });
-		}
 	}
 
 	wasCursorPressed_ = input.isCursorPressed;
@@ -401,8 +388,6 @@ void UIWorld::Update(const UIWorldInput& input) {
 	if (!input.isNavigationPressed) {
 		navigationCapturedButton_ = {};
 	}
-
-	InvokeCallbacks(pendingCallbacks);
 }
 
 void UIWorld::Draw() const {
@@ -610,31 +595,6 @@ void UIWorld::MoveSelection(int32_t offset) {
 	selectedButton_ = offset > 0
 		? candidates[(currentIndex + 1u) % candidates.size()]
 		: candidates[(currentIndex + candidates.size() - 1u) % candidates.size()];
-}
-
-void UIWorld::InvokeCallbacks(const std::vector<PendingCallback>& callbacks) {
-	for (const PendingCallback& pending : callbacks) {
-		const ButtonSlot* slot = FindSlot(pending.handle);
-		if (!slot) {
-			continue;
-		}
-
-		std::function<void()> callback;
-		switch (pending.type) {
-			case CallbackType::Trigger:
-				callback = slot->callbacks.onTrigger;
-				break;
-			case CallbackType::Hold:
-				callback = slot->callbacks.onHold;
-				break;
-			case CallbackType::Release:
-				callback = slot->callbacks.onRelease;
-				break;
-		}
-		if (callback) {
-			callback();
-		}
-	}
 }
 
 void UIWorld::InvalidateHandle(UIButtonHandle handle) {
