@@ -1,12 +1,32 @@
 #include "LGF/UI/UIWorld.h"
 
 #include <algorithm>
+#include <array>
+#include <cmath>
 #include <iterator>
 #include <utility>
 
+#include "LGF/Collision/Collision3D.h"
+#include "LGF/Graphics/Camera3D.h"
+#include "LGF/Graphics/Line3D.h"
+#include "LGF/Math/MathUtils.h"
 #include "LGF/Window.h"
 
 using namespace LGF;
+
+UICursor3D LGF::MakeUICursor3D(
+	const Camera3D& camera,
+	const Vector2& screenPosition,
+	float maxDistance) {
+	const Vector3 farPoint = camera.ScreenToWorld(screenPosition, 1.0f);
+	return {
+		.ray = {
+			.origin = camera.translation,
+			.direction = farPoint - camera.translation,
+		},
+		.maxDistance = maxDistance,
+	};
+}
 
 bool UIButtonHandle::IsValid() const {
 	return index != InvalidIndex && generation != 0u;
@@ -25,11 +45,60 @@ UIButtonHandle UIWorld::AddButton(const UIButtonDesc& desc) {
 	}
 
 	ButtonSlot& slot = buttons_[index];
-	slot.desc = desc;
+	slot.space = ButtonSpace::Screen;
+	slot.transform = desc.transform;
+	slot.transform3D = {};
+	slot.callbacks = desc.callbacks;
+	slot.draw = desc.draw;
+	slot.draw3D = {};
+	slot.isDirectPressed = desc.isDirectPressed;
 	slot.state = {
 		.isVisible = desc.isVisible,
 		.isEnabled = desc.isEnabled,
 	};
+	slot.isCursorEnabled = desc.isCursorEnabled;
+	slot.isNavigationEnabled = desc.isNavigationEnabled;
+	slot.isVisible = desc.isVisible;
+	slot.isEnabled = desc.isEnabled;
+	slot.isOccupied = true;
+
+	const UIButtonHandle handle{ static_cast<uint32_t>(index), slot.generation };
+	buttonOrder_.push_back(handle);
+	if (!selectedButton_.IsValid() && desc.isNavigationEnabled &&
+		desc.isVisible && desc.isEnabled) {
+		selectedButton_ = handle;
+	}
+	return handle;
+}
+
+UIButtonHandle UIWorld::AddButton3D(const UIButtonDesc3D& desc) {
+	std::size_t index = 0u;
+	for (; index < buttons_.size(); ++index) {
+		if (!buttons_[index].isOccupied) {
+			break;
+		}
+	}
+
+	if (index == buttons_.size()) {
+		buttons_.push_back({});
+	}
+
+	ButtonSlot& slot = buttons_[index];
+	slot.space = ButtonSpace::World;
+	slot.transform = {};
+	slot.transform3D = desc.transform;
+	slot.callbacks = desc.callbacks;
+	slot.draw = {};
+	slot.draw3D = desc.draw;
+	slot.isDirectPressed = desc.isDirectPressed;
+	slot.state = {
+		.isVisible = desc.isVisible,
+		.isEnabled = desc.isEnabled,
+	};
+	slot.isCursorEnabled = desc.isCursorEnabled;
+	slot.isNavigationEnabled = desc.isNavigationEnabled;
+	slot.isVisible = desc.isVisible;
+	slot.isEnabled = desc.isEnabled;
 	slot.isOccupied = true;
 
 	const UIButtonHandle handle{ static_cast<uint32_t>(index), slot.generation };
@@ -47,8 +116,17 @@ bool UIWorld::RemoveButton(UIButtonHandle handle) {
 		return false;
 	}
 
-	slot->desc = {};
+	slot->transform = {};
+	slot->transform3D = {};
+	slot->callbacks = {};
+	slot->draw = {};
+	slot->draw3D = {};
+	slot->isDirectPressed = {};
 	slot->state = {};
+	slot->isCursorEnabled = true;
+	slot->isNavigationEnabled = false;
+	slot->isVisible = true;
+	slot->isEnabled = true;
 	slot->isOccupied = false;
 	++slot->generation;
 	if (slot->generation == 0u) {
@@ -65,8 +143,17 @@ void UIWorld::Clear() {
 		if (!slot.isOccupied) {
 			continue;
 		}
-		slot.desc = {};
+		slot.transform = {};
+		slot.transform3D = {};
+		slot.callbacks = {};
+		slot.draw = {};
+		slot.draw3D = {};
+		slot.isDirectPressed = {};
 		slot.state = {};
+		slot.isCursorEnabled = true;
+		slot.isNavigationEnabled = false;
+		slot.isVisible = true;
+		slot.isEnabled = true;
 		slot.isOccupied = false;
 		++slot.generation;
 		if (slot.generation == 0u) {
@@ -94,10 +181,21 @@ bool UIWorld::SetTransform(
 	UIButtonHandle handle,
 	const UIButtonTransform& transform) {
 	ButtonSlot* slot = FindSlot(handle);
-	if (!slot) {
+	if (!slot || slot->space != ButtonSpace::Screen) {
 		return false;
 	}
-	slot->desc.transform = transform;
+	slot->transform = transform;
+	return true;
+}
+
+bool UIWorld::SetTransform3D(
+	UIButtonHandle handle,
+	const UIButtonTransform3D& transform) {
+	ButtonSlot* slot = FindSlot(handle);
+	if (!slot || slot->space != ButtonSpace::World) {
+		return false;
+	}
+	slot->transform3D = transform;
 	return true;
 }
 
@@ -106,7 +204,7 @@ bool UIWorld::SetVisible(UIButtonHandle handle, bool visible) {
 	if (!slot) {
 		return false;
 	}
-	slot->desc.isVisible = visible;
+	slot->isVisible = visible;
 	slot->state.isVisible = visible;
 	if (!visible) {
 		InvalidateHandle(handle);
@@ -119,7 +217,7 @@ bool UIWorld::SetEnabled(UIButtonHandle handle, bool enabled) {
 	if (!slot) {
 		return false;
 	}
-	slot->desc.isEnabled = enabled;
+	slot->isEnabled = enabled;
 	slot->state.isEnabled = enabled;
 	if (!enabled) {
 		InvalidateHandle(handle);
@@ -132,7 +230,7 @@ bool UIWorld::SetCursorEnabled(UIButtonHandle handle, bool enabled) {
 	if (!slot) {
 		return false;
 	}
-	slot->desc.isCursorEnabled = enabled;
+	slot->isCursorEnabled = enabled;
 	if (!enabled && cursorCapturedButton_ == handle) {
 		cursorCapturedButton_ = {};
 	}
@@ -144,7 +242,7 @@ bool UIWorld::SetNavigationEnabled(UIButtonHandle handle, bool enabled) {
 	if (!slot) {
 		return false;
 	}
-	slot->desc.isNavigationEnabled = enabled;
+	slot->isNavigationEnabled = enabled;
 	if (!enabled && selectedButton_ == handle) {
 		selectedButton_ = {};
 	}
@@ -161,7 +259,7 @@ bool UIWorld::SetDirectInput(
 	if (!slot) {
 		return false;
 	}
-	slot->desc.isDirectPressed = std::move(isPressed);
+	slot->isDirectPressed = std::move(isPressed);
 	return true;
 }
 
@@ -172,7 +270,7 @@ bool UIWorld::SetCallbacks(
 	if (!slot) {
 		return false;
 	}
-	slot->desc.callbacks = callbacks;
+	slot->callbacks = callbacks;
 	return true;
 }
 
@@ -180,17 +278,28 @@ bool UIWorld::SetDrawCallback(
 	UIButtonHandle handle,
 	std::function<void(const UIButtonDrawContext&)> draw) {
 	ButtonSlot* slot = FindSlot(handle);
-	if (!slot) {
+	if (!slot || slot->space != ButtonSpace::Screen) {
 		return false;
 	}
-	slot->desc.draw = std::move(draw);
+	slot->draw = std::move(draw);
+	return true;
+}
+
+bool UIWorld::SetDrawCallback3D(
+	UIButtonHandle handle,
+	std::function<void(const UIButtonDrawContext3D&)> draw) {
+	ButtonSlot* slot = FindSlot(handle);
+	if (!slot || slot->space != ButtonSpace::World) {
+		return false;
+	}
+	slot->draw3D = std::move(draw);
 	return true;
 }
 
 bool UIWorld::SetSelected(UIButtonHandle handle) {
 	const ButtonSlot* slot = FindSlot(handle);
-	if (!slot || !slot->desc.isVisible || !slot->desc.isEnabled ||
-		!slot->desc.isNavigationEnabled) {
+	if (!slot || !slot->isVisible || !slot->isEnabled ||
+		!slot->isNavigationEnabled) {
 		return false;
 	}
 	selectedButton_ = handle;
@@ -208,7 +317,16 @@ std::optional<UIButtonState> UIWorld::GetButtonState(UIButtonHandle handle) cons
 
 std::optional<Rect2D> UIWorld::GetButtonRect(UIButtonHandle handle) const {
 	const ButtonSlot* slot = FindSlot(handle);
-	return slot ? std::optional<Rect2D>{ ResolveRect(*slot) } : std::nullopt;
+	return slot && slot->space == ButtonSpace::Screen
+		? std::optional<Rect2D>{ ResolveRect(*slot) }
+		: std::nullopt;
+}
+
+std::optional<Matrix4x4> UIWorld::GetButtonWorldMatrix(UIButtonHandle handle) const {
+	const ButtonSlot* slot = FindSlot(handle);
+	return slot && slot->space == ButtonSpace::World
+		? std::optional<Matrix4x4>{ ResolveWorldMatrix(*slot) }
+		: std::nullopt;
 }
 
 void UIWorld::Update(const UIWorldInput& input) {
@@ -219,9 +337,13 @@ void UIWorld::Update(const UIWorldInput& input) {
 		MoveSelection(input.navigationOffset);
 	}
 
-	const UIButtonHandle hoveredButton = input.isCursorEnabled
-		? FindHovered(input.cursorPosition)
-		: UIButtonHandle{};
+	UIButtonHandle hoveredButton{};
+	if (input.isCursorEnabled) {
+		hoveredButton = FindHovered2D(input.cursorPosition);
+		if (!hoveredButton.IsValid() && input.cursor3D) {
+			hoveredButton = FindHovered3D(*input.cursor3D);
+		}
+	}
 
 	if (input.isCursorPressed && !wasCursorPressed_) {
 		cursorCapturedButton_ = hoveredButton;
@@ -239,21 +361,21 @@ void UIWorld::Update(const UIWorldInput& input) {
 
 		UIButtonState& state = slot->state;
 		const bool wasHeld = state.isHeld;
-		state.isVisible = slot->desc.isVisible;
-		state.isEnabled = slot->desc.isEnabled;
+		state.isVisible = slot->isVisible;
+		state.isEnabled = slot->isEnabled;
 		state.isHovered = handle == hoveredButton;
 		state.isSelected = handle == selectedButton_;
 
 		const bool isInteractable = state.isVisible && state.isEnabled;
 		const bool isCursorHeld = input.isCursorEnabled &&
-			slot->desc.isCursorEnabled && input.isCursorPressed &&
+			slot->isCursorEnabled && input.isCursorPressed &&
 			handle == cursorCapturedButton_;
-		const bool isNavigationHeld = slot->desc.isNavigationEnabled &&
+		const bool isNavigationHeld = slot->isNavigationEnabled &&
 			input.isNavigationPressed &&
 			handle == navigationCapturedButton_;
 		const bool isDirectHeld = isInteractable &&
-			slot->desc.isDirectPressed &&
-			slot->desc.isDirectPressed();
+			slot->isDirectPressed &&
+			slot->isDirectPressed();
 
 		state.isHeld = isInteractable &&
 			(isCursorHeld || isNavigationHeld || isDirectHeld);
@@ -287,11 +409,12 @@ void UIWorld::Draw() const {
 	const std::vector<UIButtonHandle> drawOrder = buttonOrder_;
 	for (const UIButtonHandle handle : drawOrder) {
 		const ButtonSlot* slot = FindSlot(handle);
-		if (!slot || !slot->desc.isVisible || !slot->desc.draw) {
+		if (!slot || slot->space != ButtonSpace::Screen ||
+			!slot->isVisible || !slot->draw) {
 			continue;
 		}
 
-		const auto draw = slot->desc.draw;
+		const auto draw = slot->draw;
 		draw({
 			.handle = handle,
 			.rect = ResolveRect(*slot),
@@ -300,13 +423,57 @@ void UIWorld::Draw() const {
 	}
 }
 
+void UIWorld::Draw3D() const {
+	const std::vector<UIButtonHandle> drawOrder = buttonOrder_;
+	for (const UIButtonHandle handle : drawOrder) {
+		const ButtonSlot* slot = FindSlot(handle);
+		if (!slot || slot->space != ButtonSpace::World ||
+			!slot->isVisible || !slot->draw3D) {
+			continue;
+		}
+
+		const auto draw = slot->draw3D;
+		draw({
+			.handle = handle,
+			.worldMatrix = ResolveWorldMatrix(*slot),
+			.state = slot->state,
+		});
+	}
+}
+
 void UIWorld::DrawHitboxes(const Vector4& color) const {
 	for (const UIButtonHandle handle : buttonOrder_) {
 		const ButtonSlot* slot = FindSlot(handle);
-		if (!slot || !slot->desc.isVisible) {
+		if (!slot || slot->space != ButtonSpace::Screen || !slot->isVisible) {
 			continue;
 		}
 		ResolveRect(*slot).Draw(color);
+	}
+}
+
+void UIWorld::DrawHitboxes3D(const Vector4& color) const {
+	constexpr std::array<Vector3, 4> localCorners{
+		Vector3{ -0.5f, -0.5f, 0.0f },
+		Vector3{ 0.5f, -0.5f, 0.0f },
+		Vector3{ 0.5f, 0.5f, 0.0f },
+		Vector3{ -0.5f, 0.5f, 0.0f },
+	};
+
+	for (const UIButtonHandle handle : buttonOrder_) {
+		const ButtonSlot* slot = FindSlot(handle);
+		if (!slot || slot->space != ButtonSpace::World || !slot->isVisible) {
+			continue;
+		}
+
+		const Matrix4x4 worldMatrix = ResolveWorldMatrix(*slot);
+		std::array<Vector3, 4> corners{};
+		for (std::size_t index = 0u; index < corners.size(); ++index) {
+			corners[index] = Math::Transform(localCorners[index], worldMatrix);
+		}
+		for (std::size_t index = 0u; index < corners.size(); ++index) {
+			Line3D(corners[index], corners[(index + 1u) % corners.size()])
+				.Draw(Math::Identity4x4(), color);
+		}
 	}
 }
 
@@ -334,7 +501,7 @@ const UIWorld::ButtonSlot* UIWorld::FindSlot(UIButtonHandle handle) const {
 
 Rect2D UIWorld::ResolveRect(const ButtonSlot& slot) const {
 	const Window::Size windowSize = Window::GetSize();
-	const UIButtonTransform& transform = slot.desc.transform;
+	const UIButtonTransform& transform = slot.transform;
 	const Vector2 windowSizeVector{
 		static_cast<float>(windowSize.width),
 		static_cast<float>(windowSize.height),
@@ -344,12 +511,19 @@ Rect2D UIWorld::ResolveRect(const ButtonSlot& slot) const {
 	return Rect2D{ leftTop, transform.size };
 }
 
-UIButtonHandle UIWorld::FindHovered(const Vector2& cursorPosition) const {
+Matrix4x4 UIWorld::ResolveWorldMatrix(const ButtonSlot& slot) const {
+	return Math::MakeAffineMatrix(
+		{ slot.transform3D.size.x, slot.transform3D.size.y, 1.0f },
+		slot.transform3D.rotation,
+		slot.transform3D.position);
+}
+
+UIButtonHandle UIWorld::FindHovered2D(const Vector2& cursorPosition) const {
 	for (auto iterator = buttonOrder_.rbegin();
 		iterator != buttonOrder_.rend(); ++iterator) {
 		const ButtonSlot* slot = FindSlot(*iterator);
-		if (!slot || !slot->desc.isVisible || !slot->desc.isEnabled ||
-			!slot->desc.isCursorEnabled) {
+		if (!slot || slot->space != ButtonSpace::Screen ||
+			!slot->isVisible || !slot->isEnabled || !slot->isCursorEnabled) {
 			continue;
 		}
 
@@ -365,12 +539,58 @@ UIButtonHandle UIWorld::FindHovered(const Vector2& cursorPosition) const {
 	return {};
 }
 
+UIButtonHandle UIWorld::FindHovered3D(const UICursor3D& cursor) const {
+	if (!Collision::IsValid(cursor.ray) || cursor.maxDistance < 0.0f) {
+		return {};
+	}
+
+	UIButtonHandle closestButton{};
+	float closestDistance = cursor.maxDistance;
+	for (const UIButtonHandle handle : buttonOrder_) {
+		const ButtonSlot* slot = FindSlot(handle);
+		if (!slot || slot->space != ButtonSpace::World ||
+			!slot->isVisible || !slot->isEnabled || !slot->isCursorEnabled) {
+			continue;
+		}
+		if (std::abs(slot->transform3D.size.x) <= Math::EPSILON ||
+			std::abs(slot->transform3D.size.y) <= Math::EPSILON) {
+			continue;
+		}
+
+		const Matrix4x4 worldMatrix = ResolveWorldMatrix(*slot);
+		const Vector3 normal = Math::TransformNormal(
+			{ 0.0f, 0.0f, 1.0f },
+			worldMatrix);
+		const Collision::Plane plane{
+			.normal = normal,
+			.distance = -Math::Dot(normal, slot->transform3D.position),
+		};
+		const std::optional<Collision::RaycastHit> hit = Collision::Raycast(
+			cursor.ray,
+			plane,
+			closestDistance);
+		if (!hit) {
+			continue;
+		}
+
+		const Vector3 localPoint = Math::Transform(
+			hit->point,
+			Math::Inverse(worldMatrix));
+		if (std::abs(localPoint.x) <= 0.5f &&
+			std::abs(localPoint.y) <= 0.5f) {
+			closestButton = handle;
+			closestDistance = hit->distance;
+		}
+	}
+	return closestButton;
+}
+
 void UIWorld::MoveSelection(int32_t offset) {
 	std::vector<UIButtonHandle> candidates;
 	for (const UIButtonHandle handle : buttonOrder_) {
 		const ButtonSlot* slot = FindSlot(handle);
-		if (slot && slot->desc.isVisible && slot->desc.isEnabled &&
-			slot->desc.isNavigationEnabled) {
+		if (slot && slot->isVisible && slot->isEnabled &&
+			slot->isNavigationEnabled) {
 			candidates.push_back(handle);
 		}
 	}
@@ -402,13 +622,13 @@ void UIWorld::InvokeCallbacks(const std::vector<PendingCallback>& callbacks) {
 		std::function<void()> callback;
 		switch (pending.type) {
 			case CallbackType::Trigger:
-				callback = slot->desc.callbacks.onTrigger;
+				callback = slot->callbacks.onTrigger;
 				break;
 			case CallbackType::Hold:
-				callback = slot->desc.callbacks.onHold;
+				callback = slot->callbacks.onHold;
 				break;
 			case CallbackType::Release:
-				callback = slot->desc.callbacks.onRelease;
+				callback = slot->callbacks.onRelease;
 				break;
 		}
 		if (callback) {
