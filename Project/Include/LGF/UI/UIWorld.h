@@ -45,6 +45,13 @@ namespace LGF {
 		bool isReleased{};
 	};
 
+	/// <summary>直前の更新で発生したButtonの入力イベント</summary>
+	struct UIButtonEvents {
+		bool triggered{};
+		bool held{};
+		bool released{};
+	};
+
 	/// <summary>Buttonの自由描画へ渡される情報</summary>
 	struct UIButtonDrawContext {
 		UIButtonHandle handle{};
@@ -66,16 +73,9 @@ namespace LGF {
 		UIButtonState state{};
 	};
 
-	struct UIButtonCallbacks {
-		std::function<void()> onTrigger;
-		std::function<void()> onHold;
-		std::function<void()> onRelease;
-	};
-
 	/// <summary>UIWorldへButtonを追加するための設定</summary>
 	struct UIButtonDesc {
 		UIButtonTransform transform{};
-		UIButtonCallbacks callbacks{};
 		std::function<void(const UIButtonDrawContext&)> draw;
 		/// <summary>Button固有の入力が押されているかを返す。</summary>
 		std::function<bool()> isDirectPressed;
@@ -88,7 +88,6 @@ namespace LGF {
 	/// <summary>UIWorldへ3D Buttonを追加するための設定</summary>
 	struct UIButtonDesc3D {
 		UIButtonTransform3D transform{};
-		UIButtonCallbacks callbacks{};
 		std::function<void(const UIButtonDrawContext3D&)> draw;
 		/// <summary>Button固有の入力が押されているかを返す。</summary>
 		std::function<bool()> isDirectPressed;
@@ -136,7 +135,6 @@ namespace LGF {
 			ButtonSpace space{};
 			UIButtonTransform transform{};
 			UIButtonTransform3D transform3D{};
-			UIButtonCallbacks callbacks{};
 			std::function<void(const UIButtonDrawContext&)> draw;
 			std::function<void(const UIButtonDrawContext3D&)> draw3D;
 			std::function<bool()> isDirectPressed;
@@ -147,17 +145,6 @@ namespace LGF {
 			bool isVisible = true;
 			bool isEnabled = true;
 			bool isOccupied{};
-		};
-
-		enum class CallbackType : uint8_t {
-			Trigger,
-			Hold,
-			Release,
-		};
-
-		struct PendingCallback {
-			UIButtonHandle handle{};
-			CallbackType type{};
 		};
 
 	public:
@@ -176,7 +163,6 @@ namespace LGF {
 		bool SetCursorEnabled(UIButtonHandle handle, bool enabled);
 		bool SetNavigationEnabled(UIButtonHandle handle, bool enabled);
 		bool SetDirectInput(UIButtonHandle handle, std::function<bool()> isPressed);
-		bool SetCallbacks(UIButtonHandle handle, const UIButtonCallbacks& callbacks);
 		bool SetDrawCallback(
 			UIButtonHandle handle,
 			std::function<void(const UIButtonDrawContext&)> draw);
@@ -187,6 +173,7 @@ namespace LGF {
 		bool SetSelected(UIButtonHandle handle);
 		UIButtonHandle GetSelected() const;
 		std::optional<UIButtonState> GetButtonState(UIButtonHandle handle) const;
+		UIButtonEvents GetEvents(UIButtonHandle handle) const;
 		std::optional<Rect2D> GetButtonRect(UIButtonHandle handle) const;
 		std::optional<Matrix4x4> GetButtonWorldMatrix(UIButtonHandle handle) const;
 
@@ -206,7 +193,6 @@ namespace LGF {
 		UIButtonHandle FindHovered2D(const Vector2& cursorPosition) const;
 		UIButtonHandle FindHovered3D(const UICursor3D& cursor) const;
 		void MoveSelection(int32_t offset);
-		void InvokeCallbacks(const std::vector<PendingCallback>& callbacks);
 		void InvalidateHandle(UIButtonHandle handle);
 
 		std::vector<ButtonSlot> buttons_;
