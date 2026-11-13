@@ -112,13 +112,19 @@ namespace LGF {
 		const Vector2& screenPosition,
 		float maxDistance = std::numeric_limits<float>::infinity());
 
+	/// <summary>選択中のButtonをどちらへ変更するか</summary>
+	enum class UISelectionChange : uint8_t {
+		None,
+		Previous,
+		Next,
+	};
+
 	/// <summary>外部で生成してUIWorldへ渡す入力状態</summary>
 	struct UIWorldInput {
 		Vector2 cursorPosition{};
 		/// <summary>カーソルで決定する入力が現在押されているか</summary>
 		bool isCursorPressed{};
-		/// <summary>負の値で前、正の値で次のButtonを選択する。</summary>
-		int32_t navigationOffset{};
+		UISelectionChange selectionChange{};
 		/// <summary>選択中のButtonを決定する入力が現在押されているか</summary>
 		bool isNavigationPressed{};
 		bool isCursorEnabled = true;
@@ -209,7 +215,7 @@ namespace LGF {
 		Matrix4x4 ResolveWorldMatrix(const ButtonSlot& slot) const;
 		UIButtonHandle FindHovered2D(const Vector2& cursorPosition) const;
 		UIButtonHandle FindHovered3D(const UICursor3D& cursor) const;
-		void MoveSelection(int32_t offset);
+		void MoveSelection(UISelectionChange change);
 		void InvalidateHandle(UIButtonHandle handle);
 
 	private:

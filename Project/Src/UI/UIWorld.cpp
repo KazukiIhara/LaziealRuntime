@@ -356,8 +356,8 @@ void UIWorld::Update(const UIWorldInput& input) {
 	if (!SetSelected(selectedButton_)) {
 		selectedButton_ = {};
 	}
-	if (input.navigationOffset != 0) {
-		MoveSelection(input.navigationOffset);
+	if (input.selectionChange != UISelectionChange::None) {
+		MoveSelection(input.selectionChange);
 	}
 
 	UIButtonHandle hoveredButton{};
@@ -633,7 +633,8 @@ UIButtonHandle UIWorld::FindHovered3D(const UICursor3D& cursor) const {
 	return closestButton;
 }
 
-void UIWorld::MoveSelection(int32_t offset) {
+void UIWorld::MoveSelection(UISelectionChange change) {
+	const bool moveNext = change == UISelectionChange::Next;
 	std::vector<UIButtonHandle> candidates;
 	for (const UIButtonHandle handle : buttonOrder_) {
 		const ButtonSlot* slot = FindSlot(handle);
@@ -649,13 +650,13 @@ void UIWorld::MoveSelection(int32_t offset) {
 
 	const auto selectedIterator = std::ranges::find(candidates, selectedButton_);
 	if (selectedIterator == candidates.end()) {
-		selectedButton_ = offset > 0 ? candidates.front() : candidates.back();
+		selectedButton_ = moveNext ? candidates.front() : candidates.back();
 		return;
 	}
 
 	const std::size_t currentIndex = static_cast<std::size_t>(
 		std::distance(candidates.begin(), selectedIterator));
-	selectedButton_ = offset > 0
+	selectedButton_ = moveNext
 		? candidates[(currentIndex + 1u) % candidates.size()]
 		: candidates[(currentIndex + candidates.size() - 1u) % candidates.size()];
 }
