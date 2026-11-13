@@ -16,7 +16,6 @@ namespace LGF {
 	class Font2D;
 	class Font3D;
 	class UIPanel3D;
-	class UIWorld;
 
 	/// <summary>UIWorldに登録されたButtonを識別する世代付きハンドル</summary>
 	struct UIButtonHandle {
@@ -101,53 +100,6 @@ namespace LGF {
 		bool isEnabled = true;
 	};
 
-	/// <summary>UIWorld内のButtonを簡単に操作するための参照</summary>
-	class UIButton {
-	public:
-		UIButton() = default;
-
-		bool IsValid() const;
-		explicit operator bool() const;
-		UIButtonHandle GetHandle() const;
-
-		std::string GetText() const;
-		UIButtonState GetState() const;
-		UIButtonEvents GetEvents() const;
-		std::optional<Rect2D> GetRect() const;
-		std::optional<Matrix4x4> GetWorldMatrix() const;
-
-		bool Trigger() const;
-		bool Press() const;
-		bool Release() const;
-
-		bool SetText(std::string text);
-		bool SetTransform(const UIButtonTransform& transform);
-		bool SetTransform3D(const UIButtonTransform3D& transform);
-		bool SetVisible(bool visible);
-		bool SetEnabled(bool enabled);
-		bool SetCursorEnabled(bool enabled);
-		bool SetNavigationEnabled(bool enabled);
-		bool SetDirectInputCommand(std::string_view command);
-		bool SetSelected();
-		bool Remove();
-
-		/// <summary>2D Buttonを標準の背景とテキストで描画</summary>
-		bool Draw(const Font2D& font, const UIButtonStyle& style = {}) const;
-		/// <summary>3D Buttonを標準のパネルとテキストで描画</summary>
-		bool Draw(
-			const UIPanel3D& panel,
-			const Font3D& font,
-			const UIButtonStyle& style = {}) const;
-
-	private:
-		friend class UIWorld;
-
-		UIButton(UIWorld* world, UIButtonHandle handle);
-
-		UIWorld* world_{};
-		UIButtonHandle handle_{};
-	};
-
 	/// <summary>3D空間のButtonを指すカーソル</summary>
 	struct UICursor3D {
 		Collision::Ray ray{};
@@ -198,15 +150,9 @@ namespace LGF {
 		};
 
 	public:
-		UIWorld() = default;
-		UIWorld(const UIWorld&) = delete;
-		UIWorld& operator=(const UIWorld&) = delete;
-		UIWorld(UIWorld&&) = delete;
-		UIWorld& operator=(UIWorld&&) = delete;
-
-		UIButton AddButton(const UIButtonDesc& desc = {});
-		UIButton AddButton3D(const UIButtonDesc3D& desc = {});
-		bool RemoveButton(UIButtonHandle handle);
+		UIButtonHandle AddButton(const UIButtonDesc& desc = {});
+		UIButtonHandle AddButton3D(const UIButtonDesc3D& desc = {});
+		bool Remove(UIButtonHandle handle);
 		void Clear();
 
 		bool IsValid(UIButtonHandle handle) const;
@@ -226,10 +172,31 @@ namespace LGF {
 		UIButtonHandle GetSelected() const;
 		std::optional<UIButtonState> GetButtonState(UIButtonHandle handle) const;
 		UIButtonEvents GetEvents(UIButtonHandle handle) const;
+		bool Trigger(UIButtonHandle handle) const;
+		bool Press(UIButtonHandle handle) const;
+		bool Release(UIButtonHandle handle) const;
 		std::optional<Rect2D> GetButtonRect(UIButtonHandle handle) const;
 		std::optional<Matrix4x4> GetButtonWorldMatrix(UIButtonHandle handle) const;
 
 		void Update(const UIWorldInput& input);
+		/// <summary>すべての2D Buttonを標準の背景とテキストで描画</summary>
+		void Draw(const Font2D& font, const UIButtonStyle& style = {}) const;
+		/// <summary>指定した2D Buttonを標準の背景とテキストで描画</summary>
+		bool Draw(
+			UIButtonHandle handle,
+			const Font2D& font,
+			const UIButtonStyle& style = {}) const;
+		/// <summary>すべての3D Buttonを標準のパネルとテキストで描画</summary>
+		void Draw3D(
+			const UIPanel3D& panel,
+			const Font3D& font,
+			const UIButtonStyle& style = {}) const;
+		/// <summary>指定した3D Buttonを標準のパネルとテキストで描画</summary>
+		bool Draw3D(
+			UIButtonHandle handle,
+			const UIPanel3D& panel,
+			const Font3D& font,
+			const UIButtonStyle& style = {}) const;
 		/// <summary>現在のButtonの当たり判定を半透明の矩形で描画する。</summary>
 		void DrawHitboxes(const Vector4& color = { 1.0f, 0.0f, 0.0f, 0.25f }) const;
 		/// <summary>現在の3D Buttonの当たり判定を線で描画する。</summary>
