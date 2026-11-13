@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cmath>
 #include <limits>
 
 #include <SDL3/SDL_events.h>
@@ -73,6 +74,18 @@ namespace {
 				static_cast<float>(std::numeric_limits<Sint16>::max()),
 			0.0f,
 			1.0f);
+	}
+
+	Vector2 ApplyStickDeadZone(const Vector2& value, float deadZone) {
+		const float length = std::sqrt(value.x * value.x + value.y * value.y);
+		if (length <= deadZone || length <= 0.0f) {
+			return {};
+		}
+
+		const float clampedLength = std::min(length, 1.0f);
+		const float remappedLength =
+			(clampedLength - deadZone) / (1.0f - deadZone);
+		return value * (remappedLength / length);
 	}
 
 	GamepadType ToGamepadType(SDL_GamepadType type) {
@@ -454,14 +467,14 @@ private:
 			}
 		}
 
-		slot.leftStick = {
+		slot.leftStick = ApplyStickDeadZone({
 			NormalizeStickAxis(SDL_GetGamepadAxis(slot.handle, SDL_GAMEPAD_AXIS_LEFTX)),
 			-NormalizeStickAxis(SDL_GetGamepadAxis(slot.handle, SDL_GAMEPAD_AXIS_LEFTY)),
-		};
-		slot.rightStick = {
+		}, config_.stickDeadZone);
+		slot.rightStick = ApplyStickDeadZone({
 			NormalizeStickAxis(SDL_GetGamepadAxis(slot.handle, SDL_GAMEPAD_AXIS_RIGHTX)),
 			-NormalizeStickAxis(SDL_GetGamepadAxis(slot.handle, SDL_GAMEPAD_AXIS_RIGHTY)),
-		};
+		}, config_.stickDeadZone);
 		slot.leftTrigger = NormalizeTriggerAxis(
 			SDL_GetGamepadAxis(slot.handle, SDL_GAMEPAD_AXIS_LEFT_TRIGGER));
 		slot.rightTrigger = NormalizeTriggerAxis(

@@ -28,6 +28,7 @@ namespace LGF {
 		bool combineJoyCons = false;
 		bool verticalJoyCons = true;
 		bool backgroundInput = false;
+		float stickDeadZone = 0.18f;
 		JoyConConfig joyCon{};
 	};
 

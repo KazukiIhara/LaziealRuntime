@@ -157,7 +157,8 @@ namespace {
 				<< "enabled = " << config.input.gamepad.enabled << '\n'
 				<< "combineJoyCons = " << config.input.gamepad.combineJoyCons << '\n'
 				<< "verticalJoyCons = " << config.input.gamepad.verticalJoyCons << '\n'
-				<< "backgroundInput = " << config.input.gamepad.backgroundInput << "\n\n"
+				<< "backgroundInput = " << config.input.gamepad.backgroundInput << '\n'
+				<< "stickDeadZone = " << config.input.gamepad.stickDeadZone << "\n\n"
 				<< "[Input.Gamepad.JoyCon.Left]\n"
 				<< "gyroscopeEnabled = "
 				<< config.input.gamepad.joyCon.left.gyroscopeEnabled << '\n'
@@ -318,6 +319,12 @@ std::optional<LGF::RuntimeConfig> LGF::LoadRuntimeConfig(
 				}
 			} else if (section == "input.gamepad" && key == "backgroundinput") {
 				if (!ParseBool(value, config.input.gamepad.backgroundInput)) {
+					return std::nullopt;
+				}
+			} else if (section == "input.gamepad" && key == "stickdeadzone") {
+				if (!ParseFloat(value, config.input.gamepad.stickDeadZone) ||
+					config.input.gamepad.stickDeadZone < 0.0f ||
+					config.input.gamepad.stickDeadZone >= 1.0f) {
 					return std::nullopt;
 				}
 			} else if (section == "input.gamepad.joycon.left" && key == "gyroscopeenabled") {
