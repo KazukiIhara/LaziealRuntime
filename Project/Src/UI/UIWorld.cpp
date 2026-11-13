@@ -75,7 +75,7 @@ UIButtonHandle UIWorld::AddButton(const UIButtonDesc& desc) {
 	slot.text = desc.text;
 	slot.transform = desc.transform;
 	slot.transform3D = {};
-	slot.directInputCommand = desc.directInputCommand;
+	slot.shortcutCommand = desc.shortcutCommand;
 	slot.state = {
 		.isVisible = desc.isVisible,
 		.isEnabled = desc.isEnabled,
@@ -112,7 +112,7 @@ UIButtonHandle UIWorld::AddButton3D(const UIButtonDesc3D& desc) {
 	slot.text = desc.text;
 	slot.transform = {};
 	slot.transform3D = desc.transform;
-	slot.directInputCommand = desc.directInputCommand;
+	slot.shortcutCommand = desc.shortcutCommand;
 	slot.state = {
 		.isVisible = desc.isVisible,
 		.isEnabled = desc.isEnabled,
@@ -141,7 +141,7 @@ bool UIWorld::Remove(UIButtonHandle handle) {
 	slot->text.clear();
 	slot->transform = {};
 	slot->transform3D = {};
-	slot->directInputCommand.clear();
+	slot->shortcutCommand.clear();
 	slot->state = {};
 	slot->isCursorEnabled = true;
 	slot->isNavigationEnabled = false;
@@ -166,7 +166,7 @@ void UIWorld::Clear() {
 		slot.text.clear();
 		slot.transform = {};
 		slot.transform3D = {};
-		slot.directInputCommand.clear();
+		slot.shortcutCommand.clear();
 		slot.state = {};
 		slot.isCursorEnabled = true;
 		slot.isNavigationEnabled = false;
@@ -284,14 +284,14 @@ bool UIWorld::SetNavigationEnabled(UIButtonHandle handle, bool enabled) {
 	return true;
 }
 
-bool UIWorld::SetDirectInputCommand(
+bool UIWorld::SetShortcutCommand(
 	UIButtonHandle handle,
 	std::string_view command) {
 	ButtonSlot* slot = FindSlot(handle);
 	if (!slot) {
 		return false;
 	}
-	slot->directInputCommand = command;
+	slot->shortcutCommand = command;
 	return true;
 }
 
@@ -395,12 +395,12 @@ void UIWorld::Update(const UIWorldInput& input) {
 		const bool isNavigationHeld = slot->isNavigationEnabled &&
 			input.isNavigationPressed &&
 			handle == navigationCapturedButton_;
-		const bool isDirectHeld = isInteractable &&
-			!slot->directInputCommand.empty() &&
-			Input::Press(slot->directInputCommand);
+		const bool isShortcutHeld = isInteractable &&
+			!slot->shortcutCommand.empty() &&
+			Input::Press(slot->shortcutCommand);
 
 		state.isHeld = isInteractable &&
-			(isCursorHeld || isNavigationHeld || isDirectHeld);
+			(isCursorHeld || isNavigationHeld || isShortcutHeld);
 		state.isTriggered = state.isHeld && !wasHeld;
 		state.isReleased = !state.isHeld && wasHeld;
 

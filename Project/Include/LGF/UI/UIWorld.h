@@ -80,8 +80,8 @@ namespace LGF {
 	struct UIButtonDesc {
 		std::string text;
 		UIButtonTransform transform{};
-		/// <summary>Button固有の操作へ割り当てるInputCommand名</summary>
-		std::string directInputCommand;
+		/// <summary>選択やカーソルに関係なくButtonを操作するInputCommand名</summary>
+		std::string shortcutCommand;
 		bool isCursorEnabled = true;
 		bool isNavigationEnabled{};
 		bool isVisible = true;
@@ -92,8 +92,8 @@ namespace LGF {
 	struct UIButtonDesc3D {
 		std::string text;
 		UIButtonTransform3D transform{};
-		/// <summary>Button固有の操作へ割り当てるInputCommand名</summary>
-		std::string directInputCommand;
+		/// <summary>選択やカーソルに関係なくButtonを操作するInputCommand名</summary>
+		std::string shortcutCommand;
 		bool isCursorEnabled = true;
 		bool isNavigationEnabled{};
 		bool isVisible = true;
@@ -139,7 +139,7 @@ namespace LGF {
 			std::string text;
 			UIButtonTransform transform{};
 			UIButtonTransform3D transform3D{};
-			std::string directInputCommand;
+			std::string shortcutCommand;
 			UIButtonState state{};
 			uint32_t generation = 1u;
 			bool isCursorEnabled = true;
@@ -166,7 +166,7 @@ namespace LGF {
 		bool SetEnabled(UIButtonHandle handle, bool enabled);
 		bool SetCursorEnabled(UIButtonHandle handle, bool enabled);
 		bool SetNavigationEnabled(UIButtonHandle handle, bool enabled);
-		bool SetDirectInputCommand(UIButtonHandle handle, std::string_view command);
+		bool SetShortcutCommand(UIButtonHandle handle, std::string_view command);
 
 		bool SetSelected(UIButtonHandle handle);
 		UIButtonHandle GetSelected() const;
