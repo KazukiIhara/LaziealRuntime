@@ -5,13 +5,18 @@
 
 #include <cstddef>
 #include <cstdint>
-#include <functional>
 #include <limits>
 #include <optional>
+#include <string>
+#include <string_view>
 #include <vector>
 
 namespace LGF {
 	class Camera3D;
+	class Font2D;
+	class Font3D;
+	class UIPanel3D;
+	class UIWorld;
 
 	/// <summary>UIWorldに登録されたButtonを識別する世代付きハンドル</summary>
 	struct UIButtonHandle {
@@ -34,6 +39,13 @@ namespace LGF {
 		Vector2 pivot{};
 	};
 
+	/// <summary>3D空間へButtonを配置する情報</summary>
+	struct UIButtonTransform3D {
+		Vector3 position{};
+		Vector2 size{ 1.0f, 1.0f };
+		Quaternion rotation{};
+	};
+
 	/// <summary>現在のButtonの状態</summary>
 	struct UIButtonState {
 		bool isVisible{};
@@ -52,33 +64,25 @@ namespace LGF {
 		bool released{};
 	};
 
-	/// <summary>Buttonの自由描画へ渡される情報</summary>
-	struct UIButtonDrawContext {
-		UIButtonHandle handle{};
-		Rect2D rect{};
-		UIButtonState state{};
-	};
-
-	/// <summary>3D空間へButtonを配置する情報</summary>
-	struct UIButtonTransform3D {
-		Vector3 position{};
-		Vector2 size{ 1.0f, 1.0f };
-		Quaternion rotation{};
-	};
-
-	/// <summary>3D Buttonの自由描画へ渡される情報</summary>
-	struct UIButtonDrawContext3D {
-		UIButtonHandle handle{};
-		Matrix4x4 worldMatrix{};
-		UIButtonState state{};
+	/// <summary>Buttonの標準描画に使用する色と3D文字サイズ</summary>
+	struct UIButtonStyle {
+		Vector4 normalColor{ 0.12f, 0.18f, 0.32f, 1.0f };
+		Vector4 hoveredColor{ 0.05f, 0.42f, 1.0f, 1.0f };
+		Vector4 selectedColor{ 0.95f, 0.42f, 0.04f, 1.0f };
+		Vector4 heldColor{ 1.0f, 0.08f, 0.48f, 1.0f };
+		Vector4 disabledColor{ 0.16f, 0.16f, 0.18f, 0.75f };
+		Vector4 textColor{ 1.0f, 1.0f, 1.0f, 1.0f };
+		Vector4 outlineColor{ 1.0f, 1.0f, 1.0f, 1.0f };
+		Vector2 outlineScale{ 1.04f, 1.18f };
+		float worldUnitsPerPixel = 0.008f;
 	};
 
 	/// <summary>UIWorldへButtonを追加するための設定</summary>
 	struct UIButtonDesc {
+		std::string text;
 		UIButtonTransform transform{};
-		std::function<void(const UIButtonDrawContext&)> draw;
-		/// <summary>Button固有の入力が押されているかを返す。</summary>
-		std::function<bool()> isDirectPressed;
+		/// <summary>Button固有の操作へ割り当てるInputCommand名</summary>
+		std::string directInputCommand;
 		bool isCursorEnabled = true;
 		bool isNavigationEnabled{};
 		bool isVisible = true;
@@ -87,14 +91,61 @@ namespace LGF {
 
 	/// <summary>UIWorldへ3D Buttonを追加するための設定</summary>
 	struct UIButtonDesc3D {
+		std::string text;
 		UIButtonTransform3D transform{};
-		std::function<void(const UIButtonDrawContext3D&)> draw;
-		/// <summary>Button固有の入力が押されているかを返す。</summary>
-		std::function<bool()> isDirectPressed;
+		/// <summary>Button固有の操作へ割り当てるInputCommand名</summary>
+		std::string directInputCommand;
 		bool isCursorEnabled = true;
 		bool isNavigationEnabled{};
 		bool isVisible = true;
 		bool isEnabled = true;
+	};
+
+	/// <summary>UIWorld内のButtonを簡単に操作するための参照</summary>
+	class UIButton {
+	public:
+		UIButton() = default;
+
+		bool IsValid() const;
+		explicit operator bool() const;
+		UIButtonHandle GetHandle() const;
+
+		std::string GetText() const;
+		UIButtonState GetState() const;
+		UIButtonEvents GetEvents() const;
+		std::optional<Rect2D> GetRect() const;
+		std::optional<Matrix4x4> GetWorldMatrix() const;
+
+		bool Trigger() const;
+		bool Press() const;
+		bool Release() const;
+
+		bool SetText(std::string text);
+		bool SetTransform(const UIButtonTransform& transform);
+		bool SetTransform3D(const UIButtonTransform3D& transform);
+		bool SetVisible(bool visible);
+		bool SetEnabled(bool enabled);
+		bool SetCursorEnabled(bool enabled);
+		bool SetNavigationEnabled(bool enabled);
+		bool SetDirectInputCommand(std::string_view command);
+		bool SetSelected();
+		bool Remove();
+
+		/// <summary>2D Buttonを標準の背景とテキストで描画</summary>
+		bool Draw(const Font2D& font, const UIButtonStyle& style = {}) const;
+		/// <summary>3D Buttonを標準のパネルとテキストで描画</summary>
+		bool Draw(
+			const UIPanel3D& panel,
+			const Font3D& font,
+			const UIButtonStyle& style = {}) const;
+
+	private:
+		friend class UIWorld;
+
+		UIButton(UIWorld* world, UIButtonHandle handle);
+
+		UIWorld* world_{};
+		UIButtonHandle handle_{};
 	};
 
 	/// <summary>3D空間のButtonを指すカーソル</summary>
@@ -123,7 +174,7 @@ namespace LGF {
 		std::optional<UICursor3D> cursor3D;
 	};
 
-	/// <summary>Buttonの配置、選択、入力、描画をまとめて管理する。</summary>
+	/// <summary>Buttonの配置、選択、入力をまとめて管理する。</summary>
 	class UIWorld {
 	private:
 		enum class ButtonSpace : uint8_t {
@@ -133,11 +184,10 @@ namespace LGF {
 
 		struct ButtonSlot {
 			ButtonSpace space{};
+			std::string text;
 			UIButtonTransform transform{};
 			UIButtonTransform3D transform3D{};
-			std::function<void(const UIButtonDrawContext&)> draw;
-			std::function<void(const UIButtonDrawContext3D&)> draw3D;
-			std::function<bool()> isDirectPressed;
+			std::string directInputCommand;
 			UIButtonState state{};
 			uint32_t generation = 1u;
 			bool isCursorEnabled = true;
@@ -148,27 +198,29 @@ namespace LGF {
 		};
 
 	public:
-		UIButtonHandle AddButton(const UIButtonDesc& desc = {});
-		UIButtonHandle AddButton3D(const UIButtonDesc3D& desc = {});
+		UIWorld() = default;
+		UIWorld(const UIWorld&) = delete;
+		UIWorld& operator=(const UIWorld&) = delete;
+		UIWorld(UIWorld&&) = delete;
+		UIWorld& operator=(UIWorld&&) = delete;
+
+		UIButton AddButton(const UIButtonDesc& desc = {});
+		UIButton AddButton3D(const UIButtonDesc3D& desc = {});
 		bool RemoveButton(UIButtonHandle handle);
 		void Clear();
 
 		bool IsValid(UIButtonHandle handle) const;
 		std::size_t GetButtonCount() const;
 
+		bool SetText(UIButtonHandle handle, std::string text);
+		std::string GetText(UIButtonHandle handle) const;
 		bool SetTransform(UIButtonHandle handle, const UIButtonTransform& transform);
 		bool SetTransform3D(UIButtonHandle handle, const UIButtonTransform3D& transform);
 		bool SetVisible(UIButtonHandle handle, bool visible);
 		bool SetEnabled(UIButtonHandle handle, bool enabled);
 		bool SetCursorEnabled(UIButtonHandle handle, bool enabled);
 		bool SetNavigationEnabled(UIButtonHandle handle, bool enabled);
-		bool SetDirectInput(UIButtonHandle handle, std::function<bool()> isPressed);
-		bool SetDrawCallback(
-			UIButtonHandle handle,
-			std::function<void(const UIButtonDrawContext&)> draw);
-		bool SetDrawCallback3D(
-			UIButtonHandle handle,
-			std::function<void(const UIButtonDrawContext3D&)> draw);
+		bool SetDirectInputCommand(UIButtonHandle handle, std::string_view command);
 
 		bool SetSelected(UIButtonHandle handle);
 		UIButtonHandle GetSelected() const;
@@ -178,8 +230,6 @@ namespace LGF {
 		std::optional<Matrix4x4> GetButtonWorldMatrix(UIButtonHandle handle) const;
 
 		void Update(const UIWorldInput& input);
-		void Draw() const;
-		void Draw3D() const;
 		/// <summary>現在のButtonの当たり判定を半透明の矩形で描画する。</summary>
 		void DrawHitboxes(const Vector4& color = { 1.0f, 0.0f, 0.0f, 0.25f }) const;
 		/// <summary>現在の3D Buttonの当たり判定を線で描画する。</summary>

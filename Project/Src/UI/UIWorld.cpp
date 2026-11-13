@@ -8,11 +8,37 @@
 
 #include "LGF/Collision/Collision3D.h"
 #include "LGF/Graphics/Camera3D.h"
+#include "LGF/Graphics/Font2D.h"
+#include "LGF/Graphics/Font3D.h"
 #include "LGF/Graphics/Line3D.h"
+#include "LGF/Graphics/UIPanel3D.h"
+#include "LGF/Input.h"
 #include "LGF/Math/MathUtils.h"
 #include "LGF/Window.h"
 
 using namespace LGF;
+
+namespace {
+
+	Vector4 GetButtonColor(
+		const UIButtonState& state,
+		const UIButtonStyle& style) {
+		if (!state.isEnabled) {
+			return style.disabledColor;
+		}
+		if (state.isHeld) {
+			return style.heldColor;
+		}
+		if (state.isHovered) {
+			return style.hoveredColor;
+		}
+		if (state.isSelected) {
+			return style.selectedColor;
+		}
+		return style.normalColor;
+	}
+
+}
 
 UICursor3D LGF::MakeUICursor3D(
 	const Camera3D& camera,
@@ -32,7 +58,159 @@ bool UIButtonHandle::IsValid() const {
 	return index != InvalidIndex && generation != 0u;
 }
 
-UIButtonHandle UIWorld::AddButton(const UIButtonDesc& desc) {
+UIButton::UIButton(UIWorld* world, UIButtonHandle handle) :
+	world_(world),
+	handle_(handle) {
+}
+
+bool UIButton::IsValid() const {
+	return world_ && world_->IsValid(handle_);
+}
+
+UIButton::operator bool() const {
+	return IsValid();
+}
+
+UIButtonHandle UIButton::GetHandle() const {
+	return handle_;
+}
+
+std::string UIButton::GetText() const {
+	return world_ ? world_->GetText(handle_) : std::string{};
+}
+
+UIButtonState UIButton::GetState() const {
+	if (!world_) {
+		return {};
+	}
+	const std::optional<UIButtonState> state = world_->GetButtonState(handle_);
+	return state.value_or(UIButtonState{});
+}
+
+UIButtonEvents UIButton::GetEvents() const {
+	return world_ ? world_->GetEvents(handle_) : UIButtonEvents{};
+}
+
+std::optional<Rect2D> UIButton::GetRect() const {
+	return world_ ? world_->GetButtonRect(handle_) : std::nullopt;
+}
+
+std::optional<Matrix4x4> UIButton::GetWorldMatrix() const {
+	return world_ ? world_->GetButtonWorldMatrix(handle_) : std::nullopt;
+}
+
+bool UIButton::Trigger() const {
+	return GetEvents().triggered;
+}
+
+bool UIButton::Press() const {
+	return GetEvents().held;
+}
+
+bool UIButton::Release() const {
+	return GetEvents().released;
+}
+
+bool UIButton::SetText(std::string text) {
+	return world_ && world_->SetText(handle_, std::move(text));
+}
+
+bool UIButton::SetTransform(const UIButtonTransform& transform) {
+	return world_ && world_->SetTransform(handle_, transform);
+}
+
+bool UIButton::SetTransform3D(const UIButtonTransform3D& transform) {
+	return world_ && world_->SetTransform3D(handle_, transform);
+}
+
+bool UIButton::SetVisible(bool visible) {
+	return world_ && world_->SetVisible(handle_, visible);
+}
+
+bool UIButton::SetEnabled(bool enabled) {
+	return world_ && world_->SetEnabled(handle_, enabled);
+}
+
+bool UIButton::SetCursorEnabled(bool enabled) {
+	return world_ && world_->SetCursorEnabled(handle_, enabled);
+}
+
+bool UIButton::SetNavigationEnabled(bool enabled) {
+	return world_ && world_->SetNavigationEnabled(handle_, enabled);
+}
+
+bool UIButton::SetDirectInputCommand(std::string_view command) {
+	return world_ && world_->SetDirectInputCommand(handle_, command);
+}
+
+bool UIButton::SetSelected() {
+	return world_ && world_->SetSelected(handle_);
+}
+
+bool UIButton::Remove() {
+	if (!world_ || !world_->RemoveButton(handle_)) {
+		return false;
+	}
+	world_ = nullptr;
+	handle_ = {};
+	return true;
+}
+
+bool UIButton::Draw(const Font2D& font, const UIButtonStyle& style) const {
+	const std::optional<Rect2D> rect = GetRect();
+	if (!rect) {
+		return false;
+	}
+	const UIButtonState state = GetState();
+	if (!state.isVisible) {
+		return true;
+	}
+
+	rect->Draw(GetButtonColor(state, style));
+	font.Draw(
+		GetText(),
+		rect->leftTop + rect->size * 0.5f,
+		{
+			.color = style.textColor,
+			.anchor = { 0.5f, 0.5f },
+		});
+	return true;
+}
+
+bool UIButton::Draw(
+	const UIPanel3D& panel,
+	const Font3D& font,
+	const UIButtonStyle& style) const {
+	const std::optional<Matrix4x4> worldMatrix = GetWorldMatrix();
+	if (!worldMatrix) {
+		return false;
+	}
+	const UIButtonState state = GetState();
+	if (!state.isVisible) {
+		return true;
+	}
+
+	if (state.isSelected || state.isHovered || state.isHeld) {
+		const Matrix4x4 outlineMatrix = Math::MakeAffineMatrix(
+			{ style.outlineScale.x, style.outlineScale.y, 1.0f },
+			{},
+			{ 0.0f, 0.0f, 0.01f }) * *worldMatrix;
+		panel.Draw(outlineMatrix, style.outlineColor);
+	}
+	panel.Draw(*worldMatrix, GetButtonColor(state, style));
+	font.Draw(
+		GetText(),
+		Math::Transform({ 0.0f, 0.0f, -0.01f }, *worldMatrix),
+		{
+			.color = style.textColor,
+			.anchor = { 0.5f, 0.5f },
+			.worldUnitsPerPixel = style.worldUnitsPerPixel,
+			.mode = Font3DMode::World,
+		});
+	return true;
+}
+
+UIButton UIWorld::AddButton(const UIButtonDesc& desc) {
 	std::size_t index = 0u;
 	for (; index < buttons_.size(); ++index) {
 		if (!buttons_[index].isOccupied) {
@@ -46,11 +224,10 @@ UIButtonHandle UIWorld::AddButton(const UIButtonDesc& desc) {
 
 	ButtonSlot& slot = buttons_[index];
 	slot.space = ButtonSpace::Screen;
+	slot.text = desc.text;
 	slot.transform = desc.transform;
 	slot.transform3D = {};
-	slot.draw = desc.draw;
-	slot.draw3D = {};
-	slot.isDirectPressed = desc.isDirectPressed;
+	slot.directInputCommand = desc.directInputCommand;
 	slot.state = {
 		.isVisible = desc.isVisible,
 		.isEnabled = desc.isEnabled,
@@ -67,10 +244,10 @@ UIButtonHandle UIWorld::AddButton(const UIButtonDesc& desc) {
 		desc.isVisible && desc.isEnabled) {
 		selectedButton_ = handle;
 	}
-	return handle;
+	return { this, handle };
 }
 
-UIButtonHandle UIWorld::AddButton3D(const UIButtonDesc3D& desc) {
+UIButton UIWorld::AddButton3D(const UIButtonDesc3D& desc) {
 	std::size_t index = 0u;
 	for (; index < buttons_.size(); ++index) {
 		if (!buttons_[index].isOccupied) {
@@ -84,11 +261,10 @@ UIButtonHandle UIWorld::AddButton3D(const UIButtonDesc3D& desc) {
 
 	ButtonSlot& slot = buttons_[index];
 	slot.space = ButtonSpace::World;
+	slot.text = desc.text;
 	slot.transform = {};
 	slot.transform3D = desc.transform;
-	slot.draw = {};
-	slot.draw3D = desc.draw;
-	slot.isDirectPressed = desc.isDirectPressed;
+	slot.directInputCommand = desc.directInputCommand;
 	slot.state = {
 		.isVisible = desc.isVisible,
 		.isEnabled = desc.isEnabled,
@@ -105,7 +281,7 @@ UIButtonHandle UIWorld::AddButton3D(const UIButtonDesc3D& desc) {
 		desc.isVisible && desc.isEnabled) {
 		selectedButton_ = handle;
 	}
-	return handle;
+	return { this, handle };
 }
 
 bool UIWorld::RemoveButton(UIButtonHandle handle) {
@@ -114,11 +290,10 @@ bool UIWorld::RemoveButton(UIButtonHandle handle) {
 		return false;
 	}
 
+	slot->text.clear();
 	slot->transform = {};
 	slot->transform3D = {};
-	slot->draw = {};
-	slot->draw3D = {};
-	slot->isDirectPressed = {};
+	slot->directInputCommand.clear();
 	slot->state = {};
 	slot->isCursorEnabled = true;
 	slot->isNavigationEnabled = false;
@@ -140,11 +315,10 @@ void UIWorld::Clear() {
 		if (!slot.isOccupied) {
 			continue;
 		}
+		slot.text.clear();
 		slot.transform = {};
 		slot.transform3D = {};
-		slot.draw = {};
-		slot.draw3D = {};
-		slot.isDirectPressed = {};
+		slot.directInputCommand.clear();
 		slot.state = {};
 		slot.isCursorEnabled = true;
 		slot.isNavigationEnabled = false;
@@ -171,6 +345,20 @@ bool UIWorld::IsValid(UIButtonHandle handle) const {
 
 std::size_t UIWorld::GetButtonCount() const {
 	return buttonOrder_.size();
+}
+
+bool UIWorld::SetText(UIButtonHandle handle, std::string text) {
+	ButtonSlot* slot = FindSlot(handle);
+	if (!slot) {
+		return false;
+	}
+	slot->text = std::move(text);
+	return true;
+}
+
+std::string UIWorld::GetText(UIButtonHandle handle) const {
+	const ButtonSlot* slot = FindSlot(handle);
+	return slot ? slot->text : std::string{};
 }
 
 bool UIWorld::SetTransform(
@@ -248,36 +436,14 @@ bool UIWorld::SetNavigationEnabled(UIButtonHandle handle, bool enabled) {
 	return true;
 }
 
-bool UIWorld::SetDirectInput(
+bool UIWorld::SetDirectInputCommand(
 	UIButtonHandle handle,
-	std::function<bool()> isPressed) {
+	std::string_view command) {
 	ButtonSlot* slot = FindSlot(handle);
 	if (!slot) {
 		return false;
 	}
-	slot->isDirectPressed = std::move(isPressed);
-	return true;
-}
-
-bool UIWorld::SetDrawCallback(
-	UIButtonHandle handle,
-	std::function<void(const UIButtonDrawContext&)> draw) {
-	ButtonSlot* slot = FindSlot(handle);
-	if (!slot || slot->space != ButtonSpace::Screen) {
-		return false;
-	}
-	slot->draw = std::move(draw);
-	return true;
-}
-
-bool UIWorld::SetDrawCallback3D(
-	UIButtonHandle handle,
-	std::function<void(const UIButtonDrawContext3D&)> draw) {
-	ButtonSlot* slot = FindSlot(handle);
-	if (!slot || slot->space != ButtonSpace::World) {
-		return false;
-	}
-	slot->draw3D = std::move(draw);
+	slot->directInputCommand = command;
 	return true;
 }
 
@@ -370,8 +536,8 @@ void UIWorld::Update(const UIWorldInput& input) {
 			input.isNavigationPressed &&
 			handle == navigationCapturedButton_;
 		const bool isDirectHeld = isInteractable &&
-			slot->isDirectPressed &&
-			slot->isDirectPressed();
+			!slot->directInputCommand.empty() &&
+			Input::Press(slot->directInputCommand);
 
 		state.isHeld = isInteractable &&
 			(isCursorHeld || isNavigationHeld || isDirectHeld);
@@ -387,42 +553,6 @@ void UIWorld::Update(const UIWorldInput& input) {
 	}
 	if (!input.isNavigationPressed) {
 		navigationCapturedButton_ = {};
-	}
-}
-
-void UIWorld::Draw() const {
-	const std::vector<UIButtonHandle> drawOrder = buttonOrder_;
-	for (const UIButtonHandle handle : drawOrder) {
-		const ButtonSlot* slot = FindSlot(handle);
-		if (!slot || slot->space != ButtonSpace::Screen ||
-			!slot->isVisible || !slot->draw) {
-			continue;
-		}
-
-		const auto draw = slot->draw;
-		draw({
-			.handle = handle,
-			.rect = ResolveRect(*slot),
-			.state = slot->state,
-		});
-	}
-}
-
-void UIWorld::Draw3D() const {
-	const std::vector<UIButtonHandle> drawOrder = buttonOrder_;
-	for (const UIButtonHandle handle : drawOrder) {
-		const ButtonSlot* slot = FindSlot(handle);
-		if (!slot || slot->space != ButtonSpace::World ||
-			!slot->isVisible || !slot->draw3D) {
-			continue;
-		}
-
-		const auto draw = slot->draw3D;
-		draw({
-			.handle = handle,
-			.worldMatrix = ResolveWorldMatrix(*slot),
-			.state = slot->state,
-		});
 	}
 }
 
