@@ -2,6 +2,8 @@
 
 #include "LGF/Collision/Shapes3D.h"
 #include "LGF/ObjectHandle.h"
+#include "LGF/Graphics/GpuPhysicsParticle.h"
+#include "LGF/Graphics/Model.h"
 
 #include <cstddef>
 #include <cstdint>
@@ -56,6 +58,34 @@ namespace LGF::Physics {
 		bool operator==(const PhysicsParticleHandle&) const = default;
 	};
 
+	// 同じ見た目でGPU描画する物理粒子を識別するハンドル
+	struct PhysicsParticleRenderGroupHandle {
+		static constexpr uint32_t InvalidIndex = std::numeric_limits<uint32_t>::max();
+
+		uint32_t index = InvalidIndex;
+		uint32_t generation{};
+
+		bool IsValid() const;
+		bool operator==(const PhysicsParticleRenderGroupHandle&) const = default;
+	};
+
+	struct PhysicsParticleSphereVisual {};
+
+	struct PhysicsParticleModelVisual {
+		Model model{};
+		Vector3 scale{ 1.0f, 1.0f, 1.0f };
+	};
+
+	using PhysicsParticleVisual = std::variant<
+		PhysicsParticleSphereVisual,
+		PhysicsParticleModelVisual>;
+
+	// 同じPrimitiveまたはModelで描画する物理粒子グループの設定
+	struct PhysicsParticleRenderGroupDesc {
+		PhysicsParticleVisual visual{};
+		Vector4 color{ 1.0f, 1.0f, 1.0f, 1.0f };
+	};
+
 	// 衝突時に使用する反発と摩擦の係数
 	struct PhysicsMaterial {
 		float restitution = 0.1f;
@@ -80,6 +110,7 @@ namespace LGF::Physics {
 	struct StaticObjectOptions {
 		PhysicsMaterial material{};
 		ObjectHandle objectHandle{};
+		PhysicsParticleRenderGroupHandle renderGroup{};
 		bool enabled = true;
 	};
 
@@ -162,15 +193,13 @@ namespace LGF::Physics {
 		bool enabled{};
 	};
 
-	// 直前の物理粒子更新で計測した処理時間と衝突候補数
+	// GPUから非同期で回収した物理粒子統計
 	struct PhysicsParticleStepStatistics {
-		double totalMilliseconds{};
-		double integrationMilliseconds{};
-		double broadPhaseMilliseconds{};
-		double positionSolveMilliseconds{};
-		double velocitySolveMilliseconds{};
-		double cleanupMilliseconds{};
+		uint64_t particleCount{};
 		uint64_t candidatePairCount{};
+		uint64_t retiredParticleCount{};
+		uint32_t latencyFrames{};
+		bool isAvailable{};
 	};
 
 	// PhysicsWorldのシミュレーション設定
@@ -188,6 +217,10 @@ namespace LGF::Physics {
 		float maximumDepenetrationVelocity = 5.0f;
 		float bounceVelocityThreshold = 0.8f;
 		float maximumDeltaTime = 1.0f / 15.0f;
+		uint32_t maximumParticleCount = 65535u;
+		uint32_t maximumColliderCount = 4096u;
+		uint32_t maximumParticleCommandCount = 262144u;
+		float maximumParticleRadius = 1.0f;
 	};
 
 	// 静的オブジェクト、キネマティックオブジェクト、動的オブジェクト、物理粒子を管理する物理ワールド
@@ -222,54 +255,16 @@ namespace LGF::Physics {
 			bool isOccupied{};
 		};
 
-		struct PhysicsParticlePair {
-			uint32_t firstIndex{};
-			uint32_t secondIndex{};
-		};
-
-		struct PhysicsParticleContactAccumulator {
-			Vector3 normal{};
-			Vector3 surfaceVelocity{};
-			float restitution{};
-			float friction{};
-			uint32_t contactCount{};
-			bool hasCollision{};
-		};
-
 		struct PhysicsParticleSlot {
-			Vector3 position{};
-			Vector3 previousPosition{};
-			Vector3 velocity{};
-			Vector3 force{};
-			float inverseMass = 1.0f;
-			float radius = 0.05f;
-			PhysicsMaterial material{};
 			ObjectHandle objectHandle{};
 			uint32_t generation = 1u;
-			bool isEnabled = true;
 			bool isOccupied{};
 		};
 
-		enum class PhysicsParticleCommandType : uint8_t {
-			SetPosition,
-			SetVelocity,
-			SetMass,
-			SetRadius,
-			SetMaterial,
-			SetObjectHandle,
-			SetEnabled,
-			AddForce,
-			AddImpulse,
-		};
-
-		struct PhysicsParticleCommand {
-			PhysicsParticleCommandType type{};
-			PhysicsParticleHandle handle{};
-			Vector3 vectorValue{};
-			PhysicsMaterial materialValue{};
-			ObjectHandle objectHandleValue{};
-			float scalarValue{};
-			bool boolValue{};
+		struct PhysicsParticleRenderGroupSlot {
+			PhysicsParticleRenderGroupDesc desc{};
+			uint32_t generation = 1u;
+			bool isOccupied{};
 		};
 
 		struct CollisionSurface {
@@ -282,6 +277,11 @@ namespace LGF::Physics {
 
 	public:
 		explicit PhysicsWorld(const PhysicsWorldSettings& settings = {});
+		~PhysicsWorld();
+		PhysicsWorld(const PhysicsWorld&) = delete;
+		PhysicsWorld& operator=(const PhysicsWorld&) = delete;
+		PhysicsWorld(PhysicsWorld&&) = delete;
+		PhysicsWorld& operator=(PhysicsWorld&&) = delete;
 
 		StaticObjectHandle AddStaticObject(const StaticObjectDesc& desc);
 		StaticObjectHandle AddStaticObject(const StaticObjectShape& shape, const StaticObjectOptions& options = {});
@@ -336,6 +336,13 @@ namespace LGF::Physics {
 		void ClearParticles();
 		bool IsValid(PhysicsParticleHandle handle) const;
 		std::size_t GetParticleCount() const;
+		PhysicsParticleRenderGroupHandle CreateParticleRenderGroup(
+			const PhysicsParticleRenderGroupDesc& desc = {});
+		bool RemoveParticleRenderGroup(PhysicsParticleRenderGroupHandle handle);
+		bool SetParticleRenderGroupDesc(
+			PhysicsParticleRenderGroupHandle handle,
+			const PhysicsParticleRenderGroupDesc& desc);
+		bool DrawParticleRenderGroups() const;
 
 		// 粒子への変更命令はキューへ追加され、次のUpdate開始時に登録順で反映される
 		bool SetParticlePosition(PhysicsParticleHandle handle, const Vector3& position, bool clearVelocity = true);
@@ -345,10 +352,18 @@ namespace LGF::Physics {
 		bool SetParticleMaterial(PhysicsParticleHandle handle, const PhysicsMaterial& material);
 		bool SetObjectHandle(PhysicsParticleHandle handle, ObjectHandle objectHandle);
 		bool SetParticleEnabled(PhysicsParticleHandle handle, bool enabled);
+		bool SetParticleRenderGroup(
+			PhysicsParticleHandle handle,
+			PhysicsParticleRenderGroupHandle renderGroup);
 		bool AddParticleForce(PhysicsParticleHandle handle, const Vector3& force);
 		bool AddParticleImpulse(PhysicsParticleHandle handle, const Vector3& impulse);
-		std::optional<PhysicsParticleState> GetParticleState(PhysicsParticleHandle handle) const;
-		void GetParticleStates(std::vector<PhysicsParticleState>& states) const;
+		bool RequestParticleStates();
+		bool GetLatestParticleStates(
+			std::vector<PhysicsParticleState>& states,
+			uint32_t& latencyFrames) const;
+		std::optional<PhysicsParticleState> GetLatestParticleState(
+			PhysicsParticleHandle handle,
+			uint32_t& latencyFrames) const;
 		const PhysicsParticleStepStatistics& GetLastParticleStepStatistics() const;
 
 		void SetSettings(const PhysicsWorldSettings& settings);
@@ -380,26 +395,14 @@ namespace LGF::Physics {
 		PhysicsParticleSlot* FindParticle(PhysicsParticleHandle handle);
 		const PhysicsParticleSlot* FindParticle(PhysicsParticleHandle handle) const;
 		void RemoveParticleAt(uint32_t index);
-		bool QueueParticleCommand(const PhysicsParticleCommand& command);
-		void ApplyParticleCommands();
+		bool QueueParticleCommand(const GpuPhysicsParticleCommand& command);
+		void ProcessRetiredParticles();
+		PhysicsParticleRenderGroupSlot* FindParticleRenderGroup(
+			PhysicsParticleRenderGroupHandle handle);
+		const PhysicsParticleRenderGroupSlot* FindParticleRenderGroup(
+			PhysicsParticleRenderGroupHandle handle) const;
+		GpuPhysicsCollider ConvertCollisionSurface(const CollisionSurface& surface) const;
 		void UpdateParticles(float deltaTime);
-		void IntegrateParticles(float substepTime);
-		std::vector<PhysicsParticlePair> BuildParticlePairs() const;
-		void SolveParticlePositions(
-			const std::vector<PhysicsParticlePair>& particlePairs,
-			const std::vector<CollisionSurface>& collisionSurfaces,
-			float maximumCorrectionPerIteration,
-			std::vector<PhysicsParticleContactAccumulator>& contacts,
-			std::vector<Vector3>& positionCorrections);
-
-		void SolveParticleVelocities(
-			const std::vector<PhysicsParticlePair>& particlePairs,
-			const std::vector<PhysicsParticleContactAccumulator>& contacts,
-			const std::vector<Vector3>& positionCorrections,
-			float substepTime,
-			float damping);
-
-		void CleanupParticles();
 
 	private:
 		PhysicsWorldSettings settings_{};
@@ -418,7 +421,9 @@ namespace LGF::Physics {
 
 		std::vector<PhysicsParticleSlot> particles_;
 		std::vector<uint32_t> freeParticleIndices_;
-		std::vector<PhysicsParticleCommand> particleCommands_;
+		std::vector<GpuPhysicsParticleCommand> particleCommands_;
+		std::vector<PhysicsParticleRenderGroupSlot> particleRenderGroups_;
+		GpuPhysicsParticleWorldHandle gpuParticleWorldHandle_{};
 		std::size_t particleCount_{};
 		PhysicsParticleStepStatistics lastParticleStepStatistics_{};
 	};

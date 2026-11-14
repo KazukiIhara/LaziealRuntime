@@ -6,6 +6,7 @@
 
 #include "../Core/HandleUtility.h"
 #include "LGF/Math/Functions/VectorMath.h"
+#include "LGF/Graphics/GpuCompute.h"
 #include "PhysicsWorldUtility.h"
 
 namespace {
@@ -47,6 +48,12 @@ namespace {
 			result.maximumDeltaTime <= 0.0f) {
 			result.maximumDeltaTime = 1.0f / 15.0f;
 		}
+		result.maximumParticleCount = std::max(result.maximumParticleCount, 1u);
+		result.maximumColliderCount = std::max(result.maximumColliderCount, 1u);
+		result.maximumParticleCommandCount = std::max(result.maximumParticleCommandCount, 3u);
+		result.maximumParticleRadius = std::isfinite(result.maximumParticleRadius)
+			? std::max(result.maximumParticleRadius, std::numeric_limits<float>::min())
+			: 1.0f;
 		return result;
 	}
 
@@ -90,6 +97,28 @@ namespace LGF::Physics {
 
 	PhysicsWorld::PhysicsWorld(const PhysicsWorldSettings& settings) :
 		settings_(AdjustSettings(settings)) {
+		gpuParticleWorldHandle_ = GpuCompute::CreatePhysicsParticleWorld({
+			.worldMinimum = settings_.worldBounds.min,
+			.worldMaximum = settings_.worldBounds.max,
+			.gravity = settings_.gravity,
+			.maximumParticleCount = settings_.maximumParticleCount,
+			.maximumColliderCount = settings_.maximumColliderCount,
+			.maximumCommandCount = settings_.maximumParticleCommandCount,
+			.substepCount = settings_.substepCount,
+			.solverIterationCount = settings_.solverIterationCount,
+			.maximumParticleRadius = settings_.maximumParticleRadius,
+			.linearDamping = settings_.linearDamping,
+			.penetrationSlop = settings_.penetrationSlop,
+			.positionCorrectionRate = settings_.positionCorrectionRate,
+			.maximumDepenetrationVelocity = settings_.maximumDepenetrationVelocity,
+			.bounceVelocityThreshold = settings_.bounceVelocityThreshold,
+		});
+	}
+
+	PhysicsWorld::~PhysicsWorld() {
+		if (gpuParticleWorldHandle_.IsValid()) {
+			GpuCompute::RemovePhysicsParticleWorld(gpuParticleWorldHandle_);
+		}
 	}
 
 	StaticObjectHandle PhysicsWorld::AddStaticObject(const StaticObjectDesc& desc) {
@@ -552,7 +581,30 @@ namespace LGF::Physics {
 	}
 
 	void PhysicsWorld::SetSettings(const PhysicsWorldSettings& settings) {
-		settings_ = AdjustSettings(settings);
+		PhysicsWorldSettings adjusted = AdjustSettings(settings);
+		// GPUリソース容量とSpatial Hashのセル幅は生成後に変更しない。
+		adjusted.maximumParticleCount = settings_.maximumParticleCount;
+		adjusted.maximumColliderCount = settings_.maximumColliderCount;
+		adjusted.maximumParticleCommandCount = settings_.maximumParticleCommandCount;
+		adjusted.maximumParticleRadius = settings_.maximumParticleRadius;
+		adjusted.substepCount = settings_.substepCount;
+		settings_ = adjusted;
+		GpuCompute::SetPhysicsParticleWorldSettings(gpuParticleWorldHandle_, {
+			.worldMinimum = settings_.worldBounds.min,
+			.worldMaximum = settings_.worldBounds.max,
+			.gravity = settings_.gravity,
+			.maximumParticleCount = settings_.maximumParticleCount,
+			.maximumColliderCount = settings_.maximumColliderCount,
+			.maximumCommandCount = settings_.maximumParticleCommandCount,
+			.substepCount = settings_.substepCount,
+			.solverIterationCount = settings_.solverIterationCount,
+			.maximumParticleRadius = settings_.maximumParticleRadius,
+			.linearDamping = settings_.linearDamping,
+			.penetrationSlop = settings_.penetrationSlop,
+			.positionCorrectionRate = settings_.positionCorrectionRate,
+			.maximumDepenetrationVelocity = settings_.maximumDepenetrationVelocity,
+			.bounceVelocityThreshold = settings_.bounceVelocityThreshold,
+		});
 	}
 
 	const PhysicsWorldSettings& PhysicsWorld::GetSettings() const {

@@ -90,7 +90,7 @@ if (result) {
 
 ## 物理粒子
 
-`LGF::Physics::PhysicsWorld`は、CPU上で球形粒子の落下、粒子間衝突、
+`LGF::Physics::PhysicsWorld`は、GPU上で球形粒子の落下、粒子間衝突、
 静的オブジェクトとの衝突、摩擦、反発を計算する簡易物理シミュレーターです。
 静的オブジェクトには`Collision::Sphere`、`Collision::SphericalCap`、
 `Collision::SphericalShellCap`、`Collision::AABB`、`Collision::OBB`を使用できます。

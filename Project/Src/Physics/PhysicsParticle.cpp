@@ -1,54 +1,22 @@
 #include "LGF/Physics/PhysicsWorld.h"
 
+#include "LGF/Graphics/GpuCompute.h"
+
 #include <algorithm>
-#include <chrono>
 #include <cmath>
-#include <unordered_map>
+#include <type_traits>
+#include <utility>
 
 #include "../Core/HandleUtility.h"
-#include "LGF/Math/Functions/VectorMath.h"
 #include "PhysicsWorldUtility.h"
 
 namespace {
-
-	using namespace LGF;
-
 	bool IsPhysicsParticleDescValid(const LGF::Physics::PhysicsParticleDesc& desc) {
 		return LGF::Physics::Internal::IsFinite(desc.position) &&
 			LGF::Physics::Internal::IsFinite(desc.velocity) &&
-			std::isfinite(desc.radius) &&
-			desc.radius > 0.0f &&
-			std::isfinite(desc.mass) &&
-			desc.mass >= 0.0f;
+			std::isfinite(desc.radius) && desc.radius > 0.0f &&
+			std::isfinite(desc.mass) && desc.mass >= 0.0f;
 	}
-
-	struct GridCell {
-		int32_t x = 0;
-		int32_t y = 0;
-		int32_t z = 0;
-
-		bool operator==(const GridCell&) const = default;
-	};
-
-	struct GridCellHash {
-		std::size_t operator()(const GridCell& cell) const {
-			std::size_t hash = std::hash<int32_t>{}(cell.x);
-			hash ^= std::hash<int32_t>{}(cell.y) +
-				0x9e3779b9u + (hash << 6u) + (hash >> 2u);
-			hash ^= std::hash<int32_t>{}(cell.z) +
-				0x9e3779b9u + (hash << 6u) + (hash >> 2u);
-			return hash;
-		}
-	};
-
-	GridCell ToGridCell(const Vector3& position, float cellSize) {
-		return {
-			static_cast<int32_t>(std::floor(position.x / cellSize)),
-			static_cast<int32_t>(std::floor(position.y / cellSize)),
-			static_cast<int32_t>(std::floor(position.z / cellSize)),
-		};
-	}
-
 }
 
 namespace LGF::Physics {
@@ -57,12 +25,20 @@ namespace LGF::Physics {
 		return index != InvalidIndex && generation != 0u;
 	}
 
+	bool PhysicsParticleRenderGroupHandle::IsValid() const {
+		return index != InvalidIndex && generation != 0u;
+	}
+
 	PhysicsParticleHandle PhysicsWorld::AddParticle(const PhysicsParticleDesc& desc) {
-		if (!IsPhysicsParticleDescValid(desc)) {
+		if (!gpuParticleWorldHandle_.IsValid() || !IsPhysicsParticleDescValid(desc) ||
+			(desc.renderGroup.IsValid() && !FindParticleRenderGroup(desc.renderGroup)) ||
+			desc.radius > settings_.maximumParticleRadius ||
+			particleCount_ >= settings_.maximumParticleCount ||
+			particleCommands_.size() + 3u > settings_.maximumParticleCommandCount) {
 			return {};
 		}
 
-		uint32_t index = 0u;
+		uint32_t index{};
 		if (freeParticleIndices_.empty()) {
 			index = static_cast<uint32_t>(particles_.size());
 			particles_.emplace_back();
@@ -73,25 +49,47 @@ namespace LGF::Physics {
 
 		PhysicsParticleSlot& particle = particles_[index];
 		const uint32_t generation = particle.generation;
-		particle = PhysicsParticleSlot{
-			.position = desc.position,
-			.previousPosition = desc.position,
-			.velocity = desc.velocity,
-			.force = {},
-			.inverseMass = desc.mass > 0.0f ? 1.0f / desc.mass : 0.0f,
-			.radius = desc.radius,
-			.material = Internal::NormalizeMaterial(desc.material),
+		particle = {
 			.objectHandle = desc.objectHandle,
 			.generation = generation,
-			.isEnabled = desc.enabled,
 			.isOccupied = true,
 		};
+		const PhysicsMaterial material = Internal::NormalizeMaterial(desc.material);
+		particleCommands_.push_back({
+			.type = GpuPhysicsParticleCommandType::Add,
+			.index = index,
+			.generation = generation,
+			.boolValue = desc.enabled ? 1u : 0u,
+			.vectorValue = desc.position,
+			.scalarValue = desc.radius,
+			.restitution = material.restitution,
+			.friction = material.friction,
+			.renderGroupIndex = desc.renderGroup.IsValid()
+				? desc.renderGroup.index
+				: PhysicsParticleRenderGroupHandle::InvalidIndex,
+		});
+		particleCommands_.push_back({
+			.type = GpuPhysicsParticleCommandType::SetVelocity,
+			.index = index,
+			.generation = generation,
+			.vectorValue = desc.velocity,
+		});
+		particleCommands_.push_back({
+			.type = GpuPhysicsParticleCommandType::SetMass,
+			.index = index,
+			.generation = generation,
+			.scalarValue = desc.mass,
+		});
 		++particleCount_;
 		return { index, generation };
 	}
 
 	bool PhysicsWorld::RemoveParticle(PhysicsParticleHandle handle) {
-		if (!FindParticle(handle)) {
+		if (!FindParticle(handle) || !QueueParticleCommand({
+			.type = GpuPhysicsParticleCommandType::Remove,
+			.index = handle.index,
+			.generation = handle.generation,
+		})) {
 			return false;
 		}
 		RemoveParticleAt(handle.index);
@@ -111,6 +109,10 @@ namespace LGF::Physics {
 			freeParticleIndices_.push_back(index);
 		}
 		particleCount_ = 0u;
+		lastParticleStepStatistics_ = {};
+		if (gpuParticleWorldHandle_.IsValid()) {
+			GpuCompute::ClearPhysicsParticleWorld(gpuParticleWorldHandle_);
+		}
 	}
 
 	bool PhysicsWorld::IsValid(PhysicsParticleHandle handle) const {
@@ -121,553 +123,373 @@ namespace LGF::Physics {
 		return particleCount_;
 	}
 
-	bool PhysicsWorld::SetParticlePosition(PhysicsParticleHandle handle, const Vector3& position, bool clearVelocity) {
-		if (!Internal::IsFinite(position)) {
+	PhysicsParticleRenderGroupHandle PhysicsWorld::CreateParticleRenderGroup(
+		const PhysicsParticleRenderGroupDesc& desc) {
+		if (!Internal::IsFinite(Vector3{ desc.color.x, desc.color.y, desc.color.z }) ||
+			!std::isfinite(desc.color.w) ||
+			!std::visit([](const auto& visual) {
+				using T = std::decay_t<decltype(visual)>;
+				if constexpr (std::is_same_v<T, PhysicsParticleModelVisual>) {
+					return visual.model.IsValid() && Internal::IsFinite(visual.scale) &&
+						visual.scale.x > 0.0f && visual.scale.y > 0.0f && visual.scale.z > 0.0f;
+				}
+				return true;
+			}, desc.visual)) {
+			return {};
+		}
+		const uint32_t index = static_cast<uint32_t>(particleRenderGroups_.size());
+		particleRenderGroups_.push_back({
+			.desc = desc,
+			.generation = 1u,
+			.isOccupied = true,
+		});
+		return { index, 1u };
+	}
+
+	bool PhysicsWorld::RemoveParticleRenderGroup(PhysicsParticleRenderGroupHandle handle) {
+		PhysicsParticleRenderGroupSlot* group = FindParticleRenderGroup(handle);
+		if (!group) {
 			return false;
 		}
-		return QueueParticleCommand({
-			.type = PhysicsParticleCommandType::SetPosition,
-			.handle = handle,
+		group->isOccupied = false;
+		group->generation = LGF::Internal::NextGeneration(group->generation);
+		return true;
+	}
+
+	bool PhysicsWorld::SetParticleRenderGroupDesc(
+		PhysicsParticleRenderGroupHandle handle,
+		const PhysicsParticleRenderGroupDesc& desc) {
+		PhysicsParticleRenderGroupSlot* group = FindParticleRenderGroup(handle);
+		if (!group ||
+			!Internal::IsFinite(Vector3{ desc.color.x, desc.color.y, desc.color.z }) ||
+			!std::isfinite(desc.color.w) ||
+			!std::visit([](const auto& visual) {
+				using T = std::decay_t<decltype(visual)>;
+				if constexpr (std::is_same_v<T, PhysicsParticleModelVisual>) {
+					return visual.model.IsValid() && Internal::IsFinite(visual.scale) &&
+						visual.scale.x > 0.0f && visual.scale.y > 0.0f && visual.scale.z > 0.0f;
+				}
+				return true;
+			}, desc.visual)) {
+			return false;
+		}
+		group->desc = desc;
+		return true;
+	}
+
+	bool PhysicsWorld::DrawParticleRenderGroups() const {
+		bool result = true;
+		for (uint32_t index = 0u; index < particleRenderGroups_.size(); ++index) {
+			const PhysicsParticleRenderGroupSlot& group = particleRenderGroups_[index];
+			if (group.isOccupied) {
+				result = std::visit([&](const auto& visual) {
+					using T = std::decay_t<decltype(visual)>;
+					if constexpr (std::is_same_v<T, PhysicsParticleModelVisual>) {
+						return GpuCompute::DrawPhysicsParticleModel(
+							gpuParticleWorldHandle_, index, visual.model, visual.scale, group.desc.color);
+					}
+					return GpuCompute::DrawPhysicsParticleSpheres(
+						gpuParticleWorldHandle_, index, group.desc.color);
+				}, group.desc.visual) && result;
+			}
+		}
+		return result;
+	}
+
+	bool PhysicsWorld::SetParticlePosition(PhysicsParticleHandle handle, const Vector3& position, bool clearVelocity) {
+		return Internal::IsFinite(position) && QueueParticleCommand({
+			.type = GpuPhysicsParticleCommandType::SetPosition,
+			.index = handle.index,
+			.generation = handle.generation,
+			.boolValue = clearVelocity ? 1u : 0u,
 			.vectorValue = position,
-			.boolValue = clearVelocity,
 		});
 	}
 
 	bool PhysicsWorld::SetParticleVelocity(PhysicsParticleHandle handle, const Vector3& velocity) {
-		if (!Internal::IsFinite(velocity)) {
-			return false;
-		}
-		return QueueParticleCommand({
-			.type = PhysicsParticleCommandType::SetVelocity,
-			.handle = handle,
+		return Internal::IsFinite(velocity) && QueueParticleCommand({
+			.type = GpuPhysicsParticleCommandType::SetVelocity,
+			.index = handle.index,
+			.generation = handle.generation,
 			.vectorValue = velocity,
 		});
 	}
 
 	bool PhysicsWorld::SetParticleMass(PhysicsParticleHandle handle, float mass) {
-		if (!std::isfinite(mass) || mass < 0.0f) {
-			return false;
-		}
-		return QueueParticleCommand({
-			.type = PhysicsParticleCommandType::SetMass,
-			.handle = handle,
+		return std::isfinite(mass) && mass >= 0.0f && QueueParticleCommand({
+			.type = GpuPhysicsParticleCommandType::SetMass,
+			.index = handle.index,
+			.generation = handle.generation,
 			.scalarValue = mass,
 		});
 	}
 
 	bool PhysicsWorld::SetParticleRadius(PhysicsParticleHandle handle, float radius) {
-		if (!std::isfinite(radius) || radius <= 0.0f) {
-			return false;
-		}
-		return QueueParticleCommand({
-			.type = PhysicsParticleCommandType::SetRadius,
-			.handle = handle,
-			.scalarValue = radius,
-		});
+		return std::isfinite(radius) && radius > 0.0f && radius <= settings_.maximumParticleRadius &&
+			QueueParticleCommand({
+				.type = GpuPhysicsParticleCommandType::SetRadius,
+				.index = handle.index,
+				.generation = handle.generation,
+				.scalarValue = radius,
+			});
 	}
 
 	bool PhysicsWorld::SetParticleMaterial(PhysicsParticleHandle handle, const PhysicsMaterial& material) {
+		const PhysicsMaterial normalized = Internal::NormalizeMaterial(material);
 		return QueueParticleCommand({
-			.type = PhysicsParticleCommandType::SetMaterial,
-			.handle = handle,
-			.materialValue = Internal::NormalizeMaterial(material),
+			.type = GpuPhysicsParticleCommandType::SetMaterial,
+			.index = handle.index,
+			.generation = handle.generation,
+			.restitution = normalized.restitution,
+			.friction = normalized.friction,
 		});
 	}
 
 	bool PhysicsWorld::SetObjectHandle(PhysicsParticleHandle handle, ObjectHandle objectHandle) {
-		return QueueParticleCommand({
-			.type = PhysicsParticleCommandType::SetObjectHandle,
-			.handle = handle,
-			.objectHandleValue = objectHandle,
-		});
+		PhysicsParticleSlot* particle = FindParticle(handle);
+		if (!particle) {
+			return false;
+		}
+		particle->objectHandle = objectHandle;
+		return true;
 	}
 
 	bool PhysicsWorld::SetParticleEnabled(PhysicsParticleHandle handle, bool enabled) {
 		return QueueParticleCommand({
-			.type = PhysicsParticleCommandType::SetEnabled,
-			.handle = handle,
-			.boolValue = enabled,
+			.type = GpuPhysicsParticleCommandType::SetEnabled,
+			.index = handle.index,
+			.generation = handle.generation,
+			.boolValue = enabled ? 1u : 0u,
+		});
+	}
+
+	bool PhysicsWorld::SetParticleRenderGroup(
+		PhysicsParticleHandle handle,
+		PhysicsParticleRenderGroupHandle renderGroup) {
+		if (renderGroup.IsValid() && !FindParticleRenderGroup(renderGroup)) {
+			return false;
+		}
+		return QueueParticleCommand({
+			.type = GpuPhysicsParticleCommandType::SetRenderGroup,
+			.index = handle.index,
+			.generation = handle.generation,
+			.renderGroupIndex = renderGroup.IsValid()
+				? renderGroup.index
+				: PhysicsParticleRenderGroupHandle::InvalidIndex,
 		});
 	}
 
 	bool PhysicsWorld::AddParticleForce(PhysicsParticleHandle handle, const Vector3& force) {
-		if (!Internal::IsFinite(force)) {
-			return false;
-		}
-		return QueueParticleCommand({
-			.type = PhysicsParticleCommandType::AddForce,
-			.handle = handle,
+		return Internal::IsFinite(force) && QueueParticleCommand({
+			.type = GpuPhysicsParticleCommandType::AddForce,
+			.index = handle.index,
+			.generation = handle.generation,
 			.vectorValue = force,
 		});
 	}
 
 	bool PhysicsWorld::AddParticleImpulse(PhysicsParticleHandle handle, const Vector3& impulse) {
-		if (!Internal::IsFinite(impulse)) {
-			return false;
-		}
-		return QueueParticleCommand({
-			.type = PhysicsParticleCommandType::AddImpulse,
-			.handle = handle,
+		return Internal::IsFinite(impulse) && QueueParticleCommand({
+			.type = GpuPhysicsParticleCommandType::AddImpulse,
+			.index = handle.index,
+			.generation = handle.generation,
 			.vectorValue = impulse,
 		});
 	}
 
-	std::optional<PhysicsParticleState> PhysicsWorld::GetParticleState(PhysicsParticleHandle handle) const {
-		const PhysicsParticleSlot* particle = FindParticle(handle);
-		if (!particle) {
-			return std::nullopt;
-		}
-		return PhysicsParticleState{
-			.handle = handle,
-			.position = particle->position,
-			.velocity = particle->velocity,
-			.radius = particle->radius,
-			.mass = particle->inverseMass > 0.0f ? 1.0f / particle->inverseMass : 0.0f,
-			.material = particle->material,
-			.objectHandle = particle->objectHandle,
-			.enabled = particle->isEnabled,
-		};
+	bool PhysicsWorld::RequestParticleStates() {
+		return GpuCompute::RequestPhysicsParticleStates(gpuParticleWorldHandle_);
 	}
 
-	void PhysicsWorld::GetParticleStates(std::vector<PhysicsParticleState>& states) const {
+	bool PhysicsWorld::GetLatestParticleStates(
+		std::vector<PhysicsParticleState>& states,
+		uint32_t& latencyFrames) const {
+		std::vector<GpuPhysicsParticleState> gpuStates;
+		if (!GpuCompute::GetLatestPhysicsParticleStates(
+			gpuParticleWorldHandle_, gpuStates, latencyFrames)) {
+			states.clear();
+			return false;
+		}
 		states.clear();
 		states.reserve(particleCount_);
-		for (uint32_t index = 0u; index < particles_.size(); ++index) {
-			const PhysicsParticleSlot& particle = particles_[index];
-			if (!particle.isOccupied) {
+		const uint32_t stateCount = static_cast<uint32_t>(std::min(gpuStates.size(), particles_.size()));
+		for (uint32_t index = 0u; index < stateCount; ++index) {
+			const GpuPhysicsParticleState& gpuState = gpuStates[index];
+			const PhysicsParticleSlot& slot = particles_[index];
+			if (gpuState.alive == 0u || !slot.isOccupied || slot.generation != gpuState.generation) {
 				continue;
 			}
-			states.push_back(PhysicsParticleState{
-				.handle = { index, particle.generation },
-				.position = particle.position,
-				.velocity = particle.velocity,
-				.radius = particle.radius,
-				.mass = particle.inverseMass > 0.0f ? 1.0f / particle.inverseMass : 0.0f,
-				.material = particle.material,
-				.objectHandle = particle.objectHandle,
-				.enabled = particle.isEnabled,
-				});
+			states.push_back({
+				.handle = { index, gpuState.generation },
+				.position = gpuState.position,
+				.velocity = gpuState.velocity,
+				.radius = gpuState.radius,
+				.mass = gpuState.inverseMass > 0.0f ? 1.0f / gpuState.inverseMass : 0.0f,
+				.material = {
+					.restitution = gpuState.restitution,
+					.friction = gpuState.friction,
+				},
+				.objectHandle = slot.objectHandle,
+				.enabled = gpuState.enabled != 0u,
+			});
 		}
+		return true;
+	}
+
+	std::optional<PhysicsParticleState> PhysicsWorld::GetLatestParticleState(
+		PhysicsParticleHandle handle,
+		uint32_t& latencyFrames) const {
+		if (!FindParticle(handle)) {
+			latencyFrames = 0u;
+			return std::nullopt;
+		}
+		GpuPhysicsParticleState state{};
+		if (!GpuCompute::GetLatestPhysicsParticleState(
+			gpuParticleWorldHandle_, handle.index, state, latencyFrames)) {
+			return std::nullopt;
+		}
+		if (state.alive == 0u || state.generation != handle.generation) {
+			return std::nullopt;
+		}
+		const PhysicsParticleSlot& slot = particles_[handle.index];
+		return PhysicsParticleState{
+			.handle = handle,
+			.position = state.position,
+			.velocity = state.velocity,
+			.radius = state.radius,
+			.mass = state.inverseMass > 0.0f ? 1.0f / state.inverseMass : 0.0f,
+			.material = {
+				.restitution = state.restitution,
+				.friction = state.friction,
+			},
+			.objectHandle = slot.objectHandle,
+			.enabled = state.enabled != 0u,
+		};
 	}
 
 	const PhysicsParticleStepStatistics& PhysicsWorld::GetLastParticleStepStatistics() const {
 		return lastParticleStepStatistics_;
 	}
 
-	bool PhysicsWorld::QueueParticleCommand(const PhysicsParticleCommand& command) {
-		if (!FindParticle(command.handle)) {
+	bool PhysicsWorld::QueueParticleCommand(const GpuPhysicsParticleCommand& command) {
+		if (!FindParticle({ command.index, command.generation }) ||
+			particleCommands_.size() >= settings_.maximumParticleCommandCount) {
 			return false;
 		}
 		particleCommands_.push_back(command);
 		return true;
 	}
 
-	void PhysicsWorld::ApplyParticleCommands() {
-		for (const PhysicsParticleCommand& command : particleCommands_) {
-			PhysicsParticleSlot* particle = FindParticle(command.handle);
-			if (!particle) {
+	void PhysicsWorld::ProcessRetiredParticles() {
+		std::vector<GpuRetiredPhysicsParticle> retiredParticles;
+		if (!GpuCompute::ConsumeRetiredPhysicsParticles(gpuParticleWorldHandle_, retiredParticles)) {
+			return;
+		}
+		for (const GpuRetiredPhysicsParticle& retired : retiredParticles) {
+			if (retired.index >= particles_.size()) {
 				continue;
 			}
-
-			switch (command.type) {
-			case PhysicsParticleCommandType::SetPosition:
-				particle->position = command.vectorValue;
-				particle->previousPosition = command.vectorValue;
-				if (command.boolValue) {
-					particle->velocity = {};
-				}
-				break;
-			case PhysicsParticleCommandType::SetVelocity:
-				particle->velocity = command.vectorValue;
-				break;
-			case PhysicsParticleCommandType::SetMass:
-				particle->inverseMass = command.scalarValue > 0.0f
-					? 1.0f / command.scalarValue
-					: 0.0f;
-				if (particle->inverseMass == 0.0f) {
-					particle->velocity = {};
-				}
-				break;
-			case PhysicsParticleCommandType::SetRadius:
-				particle->radius = command.scalarValue;
-				break;
-			case PhysicsParticleCommandType::SetMaterial:
-				particle->material = command.materialValue;
-				break;
-			case PhysicsParticleCommandType::SetObjectHandle:
-				particle->objectHandle = command.objectHandleValue;
-				break;
-			case PhysicsParticleCommandType::SetEnabled:
-				particle->isEnabled = command.boolValue;
-				break;
-			case PhysicsParticleCommandType::AddForce:
-				particle->force += command.vectorValue;
-				break;
-			case PhysicsParticleCommandType::AddImpulse:
-				if (particle->inverseMass > 0.0f) {
-					particle->velocity += command.vectorValue * particle->inverseMass;
-				}
-				break;
-			}
-		}
-		particleCommands_.clear();
-	}
-
-	void PhysicsWorld::IntegrateParticles(float substepTime) {
-		for (PhysicsParticleSlot& particle : particles_) {
-			if (!particle.isOccupied || !particle.isEnabled) {
-				continue;
-			}
-
-			particle.previousPosition = particle.position;
-			if (particle.inverseMass <= 0.0f) {
-				particle.velocity = {};
-				continue;
-			}
-
-			const Vector3 acceleration =
-				settings_.gravity + particle.force * particle.inverseMass;
-			particle.velocity += acceleration * substepTime;
-			particle.position += particle.velocity * substepTime;
-		}
-	}
-
-	std::vector<PhysicsWorld::PhysicsParticlePair> PhysicsWorld::BuildParticlePairs() const {
-		std::vector<PhysicsParticlePair> pairs;
-		float maximumRadius = 0.0f;
-		for (const PhysicsParticleSlot& particle : particles_) {
-			if (particle.isOccupied && particle.isEnabled) {
-				maximumRadius = std::max(maximumRadius, particle.radius);
-			}
-		}
-		if (maximumRadius <= 0.0f) {
-			return pairs;
-		}
-
-		// 粒子の直径をセル幅とし、同じセルと周囲26セルだけを候補にする
-		const float cellSize = maximumRadius * 2.0f;
-		pairs.reserve(particleCount_);
-		std::unordered_map<GridCell, std::vector<uint32_t>, GridCellHash> grid;
-		grid.reserve(particleCount_);
-		for (uint32_t index = 0u; index < particles_.size(); ++index) {
-			const PhysicsParticleSlot& particle = particles_[index];
-			if (particle.isOccupied && particle.isEnabled) {
-				grid[ToGridCell(particle.position, cellSize)].push_back(index);
-			}
-		}
-
-		for (uint32_t firstIndex = 0u; firstIndex < particles_.size(); ++firstIndex) {
-			const PhysicsParticleSlot& first = particles_[firstIndex];
-			if (!first.isOccupied || !first.isEnabled) {
-				continue;
-			}
-
-			const GridCell center = ToGridCell(first.position, cellSize);
-			for (int32_t z = -1; z <= 1; ++z) {
-				for (int32_t y = -1; y <= 1; ++y) {
-					for (int32_t x = -1; x <= 1; ++x) {
-						const GridCell neighbor{
-							center.x + x,
-							center.y + y,
-							center.z + z,
-						};
-						const auto iterator = grid.find(neighbor);
-						if (iterator == grid.end()) {
-							continue;
-						}
-						for (const uint32_t secondIndex : iterator->second) {
-							if (secondIndex > firstIndex) {
-								pairs.push_back({ firstIndex, secondIndex });
-							}
-						}
-					}
-				}
-			}
-		}
-		return pairs;
-	}
-
-	void PhysicsWorld::SolveParticlePositions(
-		const std::vector<PhysicsParticlePair>& particlePairs,
-		const std::vector<CollisionSurface>& collisionSurfaces,
-		float maximumCorrectionPerIteration,
-		std::vector<PhysicsParticleContactAccumulator>& contacts,
-		std::vector<Vector3>& positionCorrections) {
-
-		const auto recordContact = [&](uint32_t particleIndex, const Vector3& normal, const Vector3& surfaceVelocity, const PhysicsMaterial& particleParameter, const PhysicsMaterial& colliderParameter) {
-				PhysicsParticleContactAccumulator& contact = contacts[particleIndex];
-				contact.normal += normal;
-				contact.surfaceVelocity += surfaceVelocity;
-				contact.restitution = std::max(contact.restitution, std::max(particleParameter.restitution, colliderParameter.restitution));
-				contact.friction = std::max(contact.friction, std::sqrt(particleParameter.friction * colliderParameter.friction));
-				++contact.contactCount;
-				contact.hasCollision = true;
-			};
-
-		for (uint32_t iteration = 0u;
-			iteration < settings_.solverIterationCount;
-			++iteration) {
-			for (const PhysicsParticlePair& pair : particlePairs) {
-				const uint32_t firstIndex = pair.firstIndex;
-				const uint32_t secondIndex = pair.secondIndex;
-				PhysicsParticleSlot& first = particles_[firstIndex];
-				PhysicsParticleSlot& second = particles_[secondIndex];
-				const float inverseMassSum = first.inverseMass + second.inverseMass;
-				if (inverseMassSum <= 0.0f) {
-					continue;
-				}
-
-				const Vector3 delta = second.position - first.position;
-				const float minimumDistance = first.radius + second.radius;
-				const float distanceSq = Math::LengthSq(delta);
-				if (distanceSq >= minimumDistance * minimumDistance) {
-					continue;
-				}
-
-				// 中心が一致した場合は粒子番号から決めた固定方向を法線に使う
-				const Vector3 fallback = (firstIndex + secondIndex) % 3u == 0u
-					? Vector3{ 1.0f, 0.0f, 0.0f }
-					: ((firstIndex + secondIndex) % 3u == 1u
-						? Vector3{ 0.0f, 1.0f, 0.0f }
-				: Vector3{ 0.0f, 0.0f, 1.0f });
-				const Vector3 normal = Collision::Internal::SafeNormal(delta, fallback);
-				const float distance = std::sqrt(std::max(distanceSq, 0.0f));
-				const float effectivePenetration = std::max(minimumDistance - distance - settings_.penetrationSlop, 0.0f);
-				const float correctionDepth = std::min(effectivePenetration * settings_.positionCorrectionRate, maximumCorrectionPerIteration);
-				const Vector3 correction = normal * (correctionDepth / inverseMassSum);
-				const Vector3 firstCorrection = -correction * first.inverseMass;
-				const Vector3 secondCorrection = correction * second.inverseMass;
-				first.position += firstCorrection;
-				second.position += secondCorrection;
-				positionCorrections[firstIndex] += firstCorrection;
-				positionCorrections[secondIndex] += secondCorrection;
-			}
-
-			for (uint32_t particleIndex = 0u;
-				particleIndex < particles_.size();
-				++particleIndex) {
-				PhysicsParticleSlot& particle = particles_[particleIndex];
-				if (!particle.isOccupied || !particle.isEnabled || particle.inverseMass <= 0.0f) {
-					continue;
-				}
-
-				for (const CollisionSurface& collisionSurface : collisionSurfaces) {
-					const Collision::Sphere particleSphere{
-						.center = particle.position,
-						.radius = particle.radius,
-					};
-					std::visit([&](const auto& shape) {
-						const std::optional<Internal::StaticContact> contact = Internal::FindContact(particleSphere, shape);
-						if (!contact || contact->penetrationDepth <= 0.0f) {
-							return;
-						}
-
-						const float effectivePenetration = std::max(contact->penetrationDepth - settings_.penetrationSlop, 0.0f);
-						const float correctionDepth = std::min(effectivePenetration * settings_.positionCorrectionRate, maximumCorrectionPerIteration);
-						const Vector3 correction = contact->normal * correctionDepth;
-						particle.position += correction;
-						positionCorrections[particleIndex] += correction;
-						const Vector3 surfaceVelocity = collisionSurface.linearVelocity + Math::Cross(collisionSurface.angularVelocity, contact->point - collisionSurface.referencePosition);
-						recordContact(particleIndex, contact->normal, surfaceVelocity, particle.material, collisionSurface.material);
-						}, collisionSurface.shape);
-
-				}
+			PhysicsParticleSlot& particle = particles_[retired.index];
+			if (particle.isOccupied && particle.generation == retired.generation) {
+				RemoveParticleAt(retired.index);
 			}
 		}
 	}
 
-	void PhysicsWorld::SolveParticleVelocities(
-		const std::vector<PhysicsParticlePair>& particlePairs,
-		const std::vector<PhysicsParticleContactAccumulator>& contacts,
-		const std::vector<Vector3>& positionCorrections,
-		float substepTime,
-		float damping) {
-
-		for (uint32_t index = 0u; index < particles_.size(); ++index) {
-			PhysicsParticleSlot& particle = particles_[index];
-			if (!particle.isOccupied || !particle.isEnabled) {
-				continue;
+	GpuPhysicsCollider PhysicsWorld::ConvertCollisionSurface(const CollisionSurface& surface) const {
+		GpuPhysicsCollider result{
+			.referencePosition = surface.referencePosition,
+			.restitution = surface.material.restitution,
+			.linearVelocity = surface.linearVelocity,
+			.friction = surface.material.friction,
+			.angularVelocity = surface.angularVelocity,
+		};
+		std::visit([&](const auto& shape) {
+			using T = std::decay_t<decltype(shape)>;
+			if constexpr (std::is_same_v<T, Collision::Sphere>) {
+				result.type = GpuPhysicsColliderType::Sphere;
+				result.data0 = { shape.center.x, shape.center.y, shape.center.z, shape.radius };
+			} else if constexpr (std::is_same_v<T, Collision::SphericalCap>) {
+				result.type = GpuPhysicsColliderType::SphericalCap;
+				result.data0 = { shape.apex.x, shape.apex.y, shape.apex.z, shape.baseRadius };
+				result.data1 = { shape.axis.x, shape.axis.y, shape.axis.z, shape.height };
+			} else if constexpr (std::is_same_v<T, Collision::SphericalShellCap>) {
+				result.type = GpuPhysicsColliderType::SphericalShellCap;
+				result.data0 = { shape.outerApex.x, shape.outerApex.y, shape.outerApex.z, shape.outerRadius };
+				result.data1 = { shape.axis.x, shape.axis.y, shape.axis.z, shape.innerRadius };
+				result.data2.x = shape.height;
+			} else if constexpr (std::is_same_v<T, Collision::AABB>) {
+				result.type = GpuPhysicsColliderType::AABB;
+				result.data0 = { shape.min.x, shape.min.y, shape.min.z, 0.0f };
+				result.data1 = { shape.max.x, shape.max.y, shape.max.z, 0.0f };
+			} else if constexpr (std::is_same_v<T, Collision::OBB>) {
+				result.type = GpuPhysicsColliderType::OBB;
+				result.data0 = { shape.center.x, shape.center.y, shape.center.z, 0.0f };
+				result.data1 = { shape.halfExtents.x, shape.halfExtents.y, shape.halfExtents.z, 0.0f };
+				result.data2 = { shape.rotation.x, shape.rotation.y, shape.rotation.z, shape.rotation.w };
 			}
-			if (particle.inverseMass <= 0.0f) {
-				particle.velocity = {};
-				continue;
-			}
-
-			// 位置補正を除いた移動量から速度を再構築する
-			particle.velocity =
-				(particle.position - particle.previousPosition -
-					positionCorrections[index]) / substepTime;
-			particle.velocity *= damping;
-
-			const PhysicsParticleContactAccumulator& contact = contacts[index];
-			if (!contact.hasCollision) {
-				continue;
-			}
-
-			const Vector3 normal = Collision::Internal::SafeNormal(contact.normal, { 0.0f, 1.0f, 0.0f });
-			const Vector3 surfaceVelocity =
-				contact.surfaceVelocity / static_cast<float>(contact.contactCount);
-			const Vector3 relativeVelocity = particle.velocity - surfaceVelocity;
-			const float normalSpeed = Math::Dot(relativeVelocity, normal);
-			if (normalSpeed >= 0.0f) {
-				continue;
-			}
-
-			const Vector3 normalVelocity = normal * normalSpeed;
-			const Vector3 tangentVelocity = relativeVelocity - normalVelocity;
-			const float restitution = -normalSpeed > settings_.bounceVelocityThreshold
-				? contact.restitution
-				: 0.0f;
-			particle.velocity = surfaceVelocity +
-				tangentVelocity * (1.0f - contact.friction) -
-				normalVelocity * restitution;
-		}
-
-		for (const PhysicsParticlePair& pair : particlePairs) {
-			const uint32_t firstIndex = pair.firstIndex;
-			const uint32_t secondIndex = pair.secondIndex;
-			PhysicsParticleSlot& first = particles_[firstIndex];
-			PhysicsParticleSlot& second = particles_[secondIndex];
-			const float inverseMassSum = first.inverseMass + second.inverseMass;
-			if (inverseMassSum <= 0.0f) {
-				continue;
-			}
-
-			const Vector3 delta = second.position - first.position;
-			const float minimumDistance = first.radius + second.radius;
-			if (Math::LengthSq(delta) > minimumDistance * minimumDistance + Math::EPSILON) {
-				continue;
-			}
-
-			const Vector3 normal = Collision::Internal::SafeNormal(delta, { 1.0f, 0.0f, 0.0f });
-			const Vector3 relativeVelocity = second.velocity - first.velocity;
-			const float normalSpeed = Math::Dot(relativeVelocity, normal);
-			if (normalSpeed >= 0.0f) {
-				continue;
-			}
-
-			const float restitution = -normalSpeed > settings_.bounceVelocityThreshold
-				? std::max(first.material.restitution, second.material.restitution)
-				: 0.0f;
-			const float normalImpulseMagnitude =
-				-(1.0f + restitution) * normalSpeed / inverseMassSum;
-			const Vector3 normalImpulse = normal * normalImpulseMagnitude;
-			first.velocity -= normalImpulse * first.inverseMass;
-			second.velocity += normalImpulse * second.inverseMass;
-
-			const Vector3 tangentVelocity = relativeVelocity - normal * normalSpeed;
-			const float tangentSpeed = Math::Length(tangentVelocity);
-			if (tangentSpeed <= Math::EPSILON) {
-				continue;
-			}
-
-			const float friction = std::sqrt(first.material.friction * second.material.friction);
-			const float tangentImpulseMagnitude = std::min(tangentSpeed / inverseMassSum, friction * normalImpulseMagnitude);
-			const Vector3 tangentImpulse =
-				-tangentVelocity / tangentSpeed * tangentImpulseMagnitude;
-			first.velocity -= tangentImpulse * first.inverseMass;
-			second.velocity += tangentImpulse * second.inverseMass;
-		}
-	}
-
-	void PhysicsWorld::CleanupParticles() {
-		for (uint32_t index = 0u; index < particles_.size(); ++index) {
-			PhysicsParticleSlot& particle = particles_[index];
-			if (!particle.isOccupied) {
-				continue;
-			}
-
-			particle.force = {};
-			if (!Collision::Contains(settings_.worldBounds, particle.position)) {
-				RemoveParticleAt(index);
-			}
-		}
+		}, surface.shape);
+		return result;
 	}
 
 	void PhysicsWorld::UpdateParticles(float deltaTime) {
-		using StepClock = std::chrono::steady_clock;
-		const auto toMilliseconds = [](StepClock::duration duration) {
-			return std::chrono::duration<double, std::milli>(duration).count();
-			};
-
 		lastParticleStepStatistics_ = {};
-		// 0以下や非数の経過時間では、安全のためシミュレーションを進めない。
-		if (!std::isfinite(deltaTime) || deltaTime <= 0.0f) {
+		if (!gpuParticleWorldHandle_.IsValid() || !std::isfinite(deltaTime) || deltaTime <= 0.0f) {
 			return;
 		}
-		ApplyParticleCommands();
-		const StepClock::time_point stepStart = StepClock::now();
-		if (particleCount_ == 0u) {
-			lastParticleStepStatistics_.totalMilliseconds =
-				toMilliseconds(StepClock::now() - stepStart);
-			return;
-		}
+		ProcessRetiredParticles();
 
-		// 極端に大きなdeltaTimeは1回の移動量とめり込みを増やすため、上限を設ける。
-		// さらに時間をサブステップへ分割し、衝突を見落としにくくする。
-		const float frameTime = std::min(deltaTime, settings_.maximumDeltaTime);
-		const float substepTime = frameTime / static_cast<float>(settings_.substepCount);
-		// 指数減衰にすると、サブステップ数が変わっても減衰の強さが変わりにくい。
-		const float damping = std::exp(-settings_.linearDamping * substepTime);
-
+		std::vector<GpuPhysicsCollider> colliders;
+		colliders.reserve((staticObjectCount_ + kinematicObjectCount_) * settings_.substepCount);
+		uint32_t colliderCountPerSubstep{};
 		for (uint32_t substep = 0u; substep < settings_.substepCount; ++substep) {
-			// 動くコライダーをフレーム開始位置から現在位置まで少しずつ進める。
-			// いきなり最終位置へ移動させず、各サブステップで衝突を確認する。
-			const float colliderInterpolation =
-				static_cast<float>(substep + 1u) /
+			const float interpolation = static_cast<float>(substep + 1u) /
 				static_cast<float>(settings_.substepCount);
-			std::vector<PhysicsParticleContactAccumulator> contacts(particles_.size());
-			// めり込み解消のためだけに動かした距離を記録する。
-			// 後で速度を求める際に差し引き、押し出しを運動速度へ変換させない。
-			std::vector<Vector3> positionCorrections(particles_.size());
-			const std::vector<CollisionSurface> collisionSurfaces = BuildCollisionSurfaces(colliderInterpolation);
-			// 深いめり込みを1回で直すと位置が急変するため、
-			// 1反復で許可する補正距離へ変換して上限をかける。
-			const float maximumCorrectionPerIteration =
-				settings_.maximumDepenetrationVelocity * substepTime /
-				static_cast<float>(settings_.solverIterationCount);
-
-			// 重力と外力から速度を更新し、その速度で衝突前の予測位置へ進める。
-			// 速度を先に更新するため、積分方法は半陰的オイラー法に相当する。
-			const StepClock::time_point integrationStart = StepClock::now();
-			IntegrateParticles(substepTime);
-			lastParticleStepStatistics_.integrationMilliseconds +=
-				toMilliseconds(StepClock::now() - integrationStart);
-
-			// 予測位置を使って候補ペアを一度だけ作り、位置補正と速度解決で共有する。
-			const StepClock::time_point broadPhaseStart = StepClock::now();
-			const std::vector<PhysicsParticlePair> particlePairs = BuildParticlePairs();
-			lastParticleStepStatistics_.broadPhaseMilliseconds +=
-				toMilliseconds(StepClock::now() - broadPhaseStart);
-			lastParticleStepStatistics_.candidatePairCount += particlePairs.size();
-
-			const StepClock::time_point positionSolveStart = StepClock::now();
-			SolveParticlePositions(particlePairs, collisionSurfaces, maximumCorrectionPerIteration, contacts, positionCorrections);
-			lastParticleStepStatistics_.positionSolveMilliseconds +=
-				toMilliseconds(StepClock::now() - positionSolveStart);
-
-			const StepClock::time_point velocitySolveStart = StepClock::now();
-			SolveParticleVelocities(particlePairs, contacts, positionCorrections, substepTime, damping);
-			lastParticleStepStatistics_.velocitySolveMilliseconds +=
-				toMilliseconds(StepClock::now() - velocitySolveStart);
+			const std::vector<CollisionSurface> surfaces = BuildCollisionSurfaces(interpolation);
+			if (substep == 0u) {
+				colliderCountPerSubstep = static_cast<uint32_t>(surfaces.size());
+				if (colliderCountPerSubstep > settings_.maximumColliderCount) {
+					return;
+				}
+			}
+			for (const CollisionSurface& surface : surfaces) {
+				colliders.push_back(ConvertCollisionSurface(surface));
+			}
 		}
 
-		const StepClock::time_point cleanupStart = StepClock::now();
-		CleanupParticles();
-		lastParticleStepStatistics_.cleanupMilliseconds =
-			toMilliseconds(StepClock::now() - cleanupStart);
-		lastParticleStepStatistics_.totalMilliseconds =
-			toMilliseconds(StepClock::now() - stepStart);
+		if (GpuCompute::UpdatePhysicsParticleWorld(
+			gpuParticleWorldHandle_, deltaTime, particleCommands_, colliders, colliderCountPerSubstep)) {
+			particleCommands_.clear();
+		}
+
+		const GpuPhysicsParticleStatistics statistics =
+			GpuCompute::GetPhysicsParticleStatistics(gpuParticleWorldHandle_);
+		lastParticleStepStatistics_ = {
+			.particleCount = statistics.particleCount,
+			.candidatePairCount = statistics.candidatePairCount,
+			.retiredParticleCount = statistics.retiredParticleCount,
+			.latencyFrames = statistics.latencyFrames,
+			.isAvailable = statistics.isAvailable,
+		};
+	}
+
+	PhysicsWorld::PhysicsParticleRenderGroupSlot* PhysicsWorld::FindParticleRenderGroup(
+		PhysicsParticleRenderGroupHandle handle) {
+		return const_cast<PhysicsParticleRenderGroupSlot*>(
+			std::as_const(*this).FindParticleRenderGroup(handle));
+	}
+
+	const PhysicsWorld::PhysicsParticleRenderGroupSlot* PhysicsWorld::FindParticleRenderGroup(
+		PhysicsParticleRenderGroupHandle handle) const {
+		if (!handle.IsValid() || handle.index >= particleRenderGroups_.size()) {
+			return nullptr;
+		}
+		const PhysicsParticleRenderGroupSlot& group = particleRenderGroups_[handle.index];
+		return group.isOccupied && group.generation == handle.generation ? &group : nullptr;
 	}
 
 	PhysicsWorld::PhysicsParticleSlot* PhysicsWorld::FindParticle(PhysicsParticleHandle handle) {
-		if (!handle.IsValid() || handle.index >= particles_.size()) {
-			return nullptr;
-		}
-		PhysicsParticleSlot& particle = particles_[handle.index];
-		return particle.isOccupied && particle.generation == handle.generation
-			? &particle
-			: nullptr;
+		return const_cast<PhysicsParticleSlot*>(std::as_const(*this).FindParticle(handle));
 	}
 
 	const PhysicsWorld::PhysicsParticleSlot* PhysicsWorld::FindParticle(PhysicsParticleHandle handle) const {
@@ -675,9 +497,7 @@ namespace LGF::Physics {
 			return nullptr;
 		}
 		const PhysicsParticleSlot& particle = particles_[handle.index];
-		return particle.isOccupied && particle.generation == handle.generation
-			? &particle
-			: nullptr;
+		return particle.isOccupied && particle.generation == handle.generation ? &particle : nullptr;
 	}
 
 	void PhysicsWorld::RemoveParticleAt(uint32_t index) {
@@ -692,5 +512,3 @@ namespace LGF::Physics {
 	}
 
 }
-
-
