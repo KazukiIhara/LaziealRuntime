@@ -110,7 +110,6 @@ namespace LGF::Physics {
 	struct StaticObjectOptions {
 		PhysicsMaterial material{};
 		ObjectHandle objectHandle{};
-		PhysicsParticleRenderGroupHandle renderGroup{};
 		bool enabled = true;
 	};
 
@@ -151,6 +150,7 @@ namespace LGF::Physics {
 		float mass = 1.0f;
 		PhysicsMaterial material{};
 		ObjectHandle objectHandle{};
+		PhysicsParticleRenderGroupHandle renderGroup{};
 		bool enabled = true;
 	};
 
