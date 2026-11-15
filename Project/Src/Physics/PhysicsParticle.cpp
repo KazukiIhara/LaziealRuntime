@@ -132,8 +132,9 @@ namespace LGF::Physics {
 				if constexpr (std::is_same_v<T, PhysicsParticleModelVisual>) {
 					return visual.model.IsValid() && Internal::IsFinite(visual.scale) &&
 						visual.scale.x > 0.0f && visual.scale.y > 0.0f && visual.scale.z > 0.0f;
+				} else {
+					return true;
 				}
-				return true;
 			}, desc.visual)) {
 			return {};
 		}
@@ -168,8 +169,9 @@ namespace LGF::Physics {
 				if constexpr (std::is_same_v<T, PhysicsParticleModelVisual>) {
 					return visual.model.IsValid() && Internal::IsFinite(visual.scale) &&
 						visual.scale.x > 0.0f && visual.scale.y > 0.0f && visual.scale.z > 0.0f;
+				} else {
+					return true;
 				}
-				return true;
 			}, desc.visual)) {
 			return false;
 		}
@@ -187,9 +189,10 @@ namespace LGF::Physics {
 					if constexpr (std::is_same_v<T, PhysicsParticleModelVisual>) {
 						return GpuCompute::DrawPhysicsParticleModel(
 							gpuParticleWorldHandle_, index, visual.model, visual.scale, group.desc.color);
+					} else {
+						return GpuCompute::DrawPhysicsParticleSpheres(
+							gpuParticleWorldHandle_, index, group.desc.color);
 					}
-					return GpuCompute::DrawPhysicsParticleSpheres(
-						gpuParticleWorldHandle_, index, group.desc.color);
 				}, group.desc.visual) && result;
 			}
 		}
