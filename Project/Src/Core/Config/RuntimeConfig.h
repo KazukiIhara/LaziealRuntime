@@ -39,6 +39,7 @@ namespace LGF {
 	struct GraphicsConfig {
 		bool vsync = true;
 		bool multiFrameContextEnabled = true;
+		bool gpuBasedValidationEnabled = false;
 	};
 
 	struct AudioConfig {

@@ -43,6 +43,7 @@ bool Framework::Initialize(const RuntimeConfig& config) {
 		.assetRoot = std::filesystem::absolute(config.assetRoot).lexically_normal(),
 		.multiFrameContextEnabled = config.graphics.multiFrameContextEnabled,
 		.vsyncEnabled = config.graphics.vsync,
+		.gpuBasedValidationEnabled = config.graphics.gpuBasedValidationEnabled,
 	};
 	if (!graphicsSystem_->Initialize(graphicsDesc)) {
 		inputSystem_->Finalize();

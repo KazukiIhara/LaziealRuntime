@@ -144,7 +144,9 @@ namespace {
 				<< "[Graphics]\n"
 				<< "vsync = " << config.graphics.vsync << '\n'
 				<< "multiFrameContextEnabled = "
-				<< config.graphics.multiFrameContextEnabled << "\n\n"
+				<< config.graphics.multiFrameContextEnabled << '\n'
+				<< "gpuBasedValidationEnabled = "
+				<< config.graphics.gpuBasedValidationEnabled << "\n\n"
 				<< "[Audio]\n"
 				<< "enabled = " << config.audio.enabled << '\n'
 				<< "masterVolume = " << config.audio.masterVolume << "\n\n"
@@ -276,6 +278,10 @@ std::optional<LGF::RuntimeConfig> LGF::LoadRuntimeConfig(
 				}
 			} else if (section == "graphics" && key == "multiframecontextenabled") {
 				if (!ParseBool(value, config.graphics.multiFrameContextEnabled)) {
+					return std::nullopt;
+				}
+			} else if (section == "graphics" && key == "gpubasedvalidationenabled") {
+				if (!ParseBool(value, config.graphics.gpuBasedValidationEnabled)) {
 					return std::nullopt;
 				}
 			} else if (section == "audio" && key == "enabled") {
