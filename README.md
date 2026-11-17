@@ -126,4 +126,27 @@ particles.Update(static_cast<float>(LGF::System::DeltaTime()));
 
 アルゴリズムと内部実装については、[PhysicsParticle実装解説](Docs/PhysicsParticle.md)を参照してください。
 
+## Effekseerエフェクト
+
+`LGF::VFX::EffectWorld`はEffekseerのエフェクトを同期読み込みし、再生個体を
+世代付きハンドルで管理します。相対パスは`RuntimeSetting.ini`の`assetRoot`を
+基準に解決され、描画はメイン3Dカメラを使用してHDR透明パスで自動実行されます。
+
+```cpp
+LGF::VFX::EffectWorld effectWorld;
+LGF::VFX::Effect explosion = effectWorld.Load("Effects/Explosion.efkefc");
+
+LGF::Transform3D transform{};
+transform.translation = { 0.0f, 1.0f, 0.0f };
+LGF::VFX::EffectHandle explosionHandle = effectWorld.Play(explosion, transform);
+
+while (LGF::System::Update()) {
+    effectWorld.Update(static_cast<float>(LGF::System::DeltaTime()));
+}
+```
+
+`Stop()`、`IsPlaying()`、`SetTransform()`で再生個体を操作できます。現在は
+メインパス、同期読み込みに限定し、歪み、深度テクスチャ連携、
+カスタムRenderPass、非同期読み込みには対応していません。
+
 
