@@ -57,7 +57,7 @@ namespace LGF::VFX {
 		EffectWorld(EffectWorld&&) = delete;
 		EffectWorld& operator=(EffectWorld&&) = delete;
 
-		/// <summary>相対パスはRuntimeSetting.iniのassetRootを基準に同期読み込みする。</summary>
+		/// <summary>相対パスはアプリケーションの作業ディレクトリを基準に同期読み込みする。</summary>
 		Effect Load(const std::filesystem::path& filePath);
 		EffectHandle Play(const Effect& effect);
 		EffectHandle Play(const Effect& effect, const Transform3D& transform);

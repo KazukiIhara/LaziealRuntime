@@ -129,12 +129,12 @@ particles.Update(static_cast<float>(LGF::System::DeltaTime()));
 ## Effekseerエフェクト
 
 `LGF::VFX::EffectWorld`はEffekseerのエフェクトを同期読み込みし、再生個体を
-世代付きハンドルで管理します。相対パスは`RuntimeSetting.ini`の`assetRoot`を
+世代付きハンドルで管理します。相対パスはアプリケーションの作業ディレクトリを
 基準に解決され、描画はメイン3Dカメラを使用してHDR透明パスで自動実行されます。
 
 ```cpp
 LGF::VFX::EffectWorld effectWorld;
-LGF::VFX::Effect explosion = effectWorld.Load("Effects/Explosion.efkefc");
+LGF::VFX::Effect explosion = effectWorld.Load("Assets/Effects/Explosion.efkefc");
 
 LGF::Transform3D transform{};
 transform.translation = { 0.0f, 1.0f, 0.0f };
