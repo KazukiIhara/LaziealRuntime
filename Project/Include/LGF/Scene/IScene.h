@@ -1,8 +1,11 @@
 #pragma once
 
 #include <memory>
+#include <string_view>
 
 namespace LGF {
+
+	struct SceneTransition;
 
 	template <class State, class Data>
 	class SceneManager;
@@ -50,6 +53,8 @@ namespace LGF {
 		}
 
 		bool ChangeScene(const StateType& state);
+		bool ChangeScene(const StateType& state, const SceneTransition& transition);
+		bool ChangeScene(const StateType& state, std::string_view transitionName);
 
 	private:
 		StateType state_;
