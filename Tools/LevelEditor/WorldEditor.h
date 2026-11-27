@@ -23,6 +23,7 @@ private:
 	void AddGameObject();
 	bool DrawObjectList();
 	bool DrawInspector(const AssetPicker& pickAsset);
+	bool DrawAddComponent(LGF::GameObjectDesc& object, const AssetPicker& pickAsset);
 	bool DrawPreview(const std::filesystem::path& directory);
 	bool DrawGizmo(const ImVec2& origin, const ImVec2& size, LGF::GameObjectDesc& object);
 	void RebuildPreview(const std::filesystem::path& directory);

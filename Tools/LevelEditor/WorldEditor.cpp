@@ -193,9 +193,10 @@ bool WorldEditor::DrawInspector(const AssetPicker& pickAsset) {
 		}
 	}
 	ImGui::Spacing();
-	ImGui::BeginDisabled();
-	ImGui::Button("Add Component");
-	ImGui::EndDisabled();
+	if (DrawAddComponent(object, pickAsset)) {
+		rebuildPreview_ = true;
+		changed = true;
+	}
 	ImGui::SameLine();
 	if (ImGui::Button("Remove object")) {
 		layout_.objects.erase(layout_.objects.begin() + static_cast<std::ptrdiff_t>(*selected_));
@@ -207,6 +208,49 @@ bool WorldEditor::DrawInspector(const AssetPicker& pickAsset) {
 	}
 	ImGui::PopID();
 	return changed;
+}
+
+bool WorldEditor::DrawAddComponent(GameObjectDesc& object, const AssetPicker& pickAsset) {
+	if (ImGui::Button("Add Component")) {
+		ImGui::OpenPopup("Add component");
+	}
+	if (!ImGui::BeginPopup("Add component")) {
+		return false;
+	}
+
+	bool added = false;
+	if (ImGui::MenuItem("Transform3D", nullptr, false, !FindComponent<Transform3D>(object))) {
+		object.components.emplace_back(Transform3D{});
+		show3D_ = true;
+		added = true;
+	}
+	if (ImGui::MenuItem("ModelRenderer...", nullptr, false, !FindComponent<ModelRendererDesc>(object))) {
+		if (auto path = pickAsset(true)) {
+			if (!FindComponent<Transform3D>(object)) {
+				object.components.emplace_back(Transform3D{});
+			}
+			object.components.emplace_back(ModelRendererDesc{ .modelPath = std::move(*path) });
+			show3D_ = true;
+			added = true;
+		}
+	}
+	if (ImGui::MenuItem("Transform2D", nullptr, false, !FindComponent<Transform2D>(object))) {
+		object.components.emplace_back(Transform2D{});
+		show3D_ = false;
+		added = true;
+	}
+	if (ImGui::MenuItem("SpriteRenderer...", nullptr, false, !FindComponent<SpriteRendererDesc>(object))) {
+		if (auto path = pickAsset(false)) {
+			if (!FindComponent<Transform2D>(object)) {
+				object.components.emplace_back(Transform2D{});
+			}
+			object.components.emplace_back(SpriteRendererDesc{ .texturePath = std::move(*path) });
+			show3D_ = false;
+			added = true;
+		}
+	}
+	ImGui::EndPopup();
+	return added;
 }
 
 void WorldEditor::SyncObject(const GameObjectDesc& description) {
