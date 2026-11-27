@@ -19,8 +19,9 @@ public:
 
 private:
 	enum class Operation { Move, Rotate, Scale };
+	enum class ObjectPreset { ThreeD, TwoD, Empty };
 
-	void AddGameObject();
+	void AddGameObject(ObjectPreset preset);
 	bool DrawObjectList();
 	bool DrawInspector(const AssetPicker& pickAsset);
 	bool DrawAddComponent(LGF::GameObjectDesc& object, const AssetPicker& pickAsset);

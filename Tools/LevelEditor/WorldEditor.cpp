@@ -94,13 +94,20 @@ bool WorldEditor::Draw(const std::filesystem::path& directory, const AssetPicker
 	return changed;
 }
 
-void WorldEditor::AddGameObject() {
+void WorldEditor::AddGameObject(ObjectPreset preset) {
 	const std::string prefix = "GameObject";
 	GameObjectDesc object{ .id = prefix };
 	for (std::size_t number = 2u; std::ranges::find(layout_.objects, object.id, &GameObjectDesc::id) != layout_.objects.end(); ++number) {
 		object.id = prefix + std::to_string(number);
 	}
 	object.name = object.id;
+	if (preset == ObjectPreset::ThreeD) {
+		object.components.emplace_back(Transform3D{});
+		show3D_ = true;
+	} else if (preset == ObjectPreset::TwoD) {
+		object.components.emplace_back(Transform2D{});
+		show3D_ = false;
+	}
 	layout_.objects.push_back(std::move(object));
 	selected_ = layout_.objects.size() - 1u;
 	rebuildPreview_ = true;
@@ -108,9 +115,24 @@ void WorldEditor::AddGameObject() {
 
 bool WorldEditor::DrawObjectList() {
 	ImGui::SeparatorText("Objects");
-	const bool added = ImGui::Button("Add GameObject");
-	if (added) {
-		AddGameObject();
+	if (ImGui::Button("Add GameObject")) {
+		ImGui::OpenPopup("Add GameObject");
+	}
+	std::optional<ObjectPreset> preset;
+	if (ImGui::BeginPopup("Add GameObject")) {
+		if (ImGui::MenuItem("3D")) {
+			preset = ObjectPreset::ThreeD;
+		}
+		if (ImGui::MenuItem("2D")) {
+			preset = ObjectPreset::TwoD;
+		}
+		if (ImGui::MenuItem("Empty")) {
+			preset = ObjectPreset::Empty;
+		}
+		ImGui::EndPopup();
+	}
+	if (preset) {
+		AddGameObject(*preset);
 	}
 	for (std::size_t index = 0u; index < layout_.objects.size(); ++index) {
 		const auto& object = layout_.objects[index];
@@ -126,7 +148,7 @@ bool WorldEditor::DrawObjectList() {
 		}
 		ImGui::PopID();
 	}
-	return added;
+	return preset.has_value();
 }
 
 bool WorldEditor::DrawInspector(const AssetPicker& pickAsset) {
