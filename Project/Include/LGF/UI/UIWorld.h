@@ -276,9 +276,11 @@ namespace LGF {
 		bool Press(UIButtonHandle handle) const;
 		bool Release(UIButtonHandle handle) const;
 		std::optional<Rect2D> GetButtonRect(UIButtonHandle handle) const;
+		std::optional<Rect2D> GetScreenRect(UIHandle handle) const;
 		std::optional<Matrix4x4> GetButtonWorldMatrix(UIButtonHandle handle) const;
 
 		void Update(const UIWorldInput& input);
+		void Update(const UIWorldInput& input, const Vector2& screenSize);
 		/// <summary>登録されたScreen / World UIを、各要素に設定されたリソースで描画</summary>
 		void Draw() const;
 		void Draw(const Font2D& font, const UIButtonStyle& style = {}) const;
@@ -294,7 +296,7 @@ namespace LGF {
 		const ElementSlot* FindSlot(UIHandle handle) const;
 		bool CanHaveChildren(const ElementSlot& slot) const;
 		bool IsButton(const ElementSlot& slot) const;
-		void ResolveLayout();
+		void ResolveLayout(const Vector2& screenSize);
 		void ResolveElement(UIHandle handle, const Rect2D* parentRect, const Matrix4x4* parentMatrix, bool parentVisible, bool parentEnabled, UIWorldOrientation orientation);
 		void RemoveSingle(UIHandle handle);
 		void DrawElement(const ElementSlot& slot) const;

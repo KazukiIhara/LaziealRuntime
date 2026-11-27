@@ -87,3 +87,9 @@ defineParameterEditor(
     runtimeDirectory,
     path.getabsolute(".."),
     "../../generated/outputs/%{cfg.buildcfg}/%{cfg.platform}")
+
+local defineLevelEditor = dofile(runtimeDirectory .. "/Tools/LevelEditor/premake5.lua")
+defineLevelEditor(
+    runtimeDirectory,
+    path.getabsolute(".."),
+    "../../generated/outputs/%{cfg.buildcfg}/%{cfg.platform}")

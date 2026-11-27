@@ -5,7 +5,9 @@
 #include "Core/Time/TimeSystem.h"
 #include "Core/Window/System/WindowSystem.h"
 #include "Input/System/InputSystem.h"
+#include "Level/LevelRuntime.h"
 #include "LGF/Graphics/GraphicsSystem.h"
+#include "LGF/Input.h"
 
 using namespace LGF;
 
@@ -108,6 +110,7 @@ bool Framework::Finalize() {
 		EndFrame();
 		isFrameStarted_ = false;
 	}
+	level_.reset();
 
 	bool succeeded = true;
 	if (timeSystem_) {
@@ -191,9 +194,22 @@ void Framework::BeginFrame() {
 	timeSystem_->BeginFrame();
 	inputSystem_->BeginFrame();
 	graphicsSystem_->BeginFrame();
+	if (level_ && level_->ui) {
+		level_->ui->world.Update({
+			.cursorPosition = Cursor::Pos(),
+			.isCursorPressed = Mouse::Left.Press(),
+			.isCursorEnabled = IsWindowFocused(),
+		});
+	}
 }
 
 void Framework::EndFrame() {
+	if (level_) {
+		level_->objects.Draw();
+		if (level_->ui) {
+			level_->ui->world.Draw();
+		}
+	}
 	inputSystem_->EndFrame();
 	graphicsSystem_->EndFrame();
 }

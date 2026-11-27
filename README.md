@@ -92,6 +92,78 @@ if (result) {
 }
 ```
 
+## レベルデータ
+
+`LevelData` のJSONは、`Type: "Level"`、`Version`、2つのパス `UI`、`World` を持ちます。
+相対パスはこのJSONがあるフォルダを基準とし、使わない参照は空文字列にできます。
+同じUIやワールドの配置ファイルを複数のレベルで参照できます。
+
+```cpp
+const auto result = LGF::SetLevelData("Level1.json");
+if (!result) {
+    // result.message に読み込み失敗の理由が入ります。
+}
+```
+
+`SetLevelData` の相対パスは `Assets/LevelDatas` が基準です。
+読み込んだ画面UIはRuntimeが更新・描画し、アンカーの基準には現在のウィンドウサイズを使います。
+`GetLevelUIWorld()` と `FindLevelUIElement("PlayButton")` でボタンなどを取得できます。
+レベルを切り替えたり `ClearLevelData()` を呼んだりしたあとは、ポインタとハンドルを取得し直してください。
+ワールド配置の参照先にある `Objects` から `GameObjectWorld` を生成し、3Dモデルと2DスプライトをRuntimeが描画します。
+`GetLevelGameObjectWorld()` で現在のWorldを取得でき、`Find("Box01")` で配置IDからハンドルを引けます。
+個体は `Get(handle)` で取得し、`GetComponent<Transform3D>()` などでコンポーネントを参照できます。
+ワールド配置の参照パスは `GetLevelData()` で取得できます。
+
+ワールド配置JSONは `Type: "WorldLayout"`、`Version`、`Objects` を持ちます。
+`LoadWorldLayout` と `SaveWorldLayout` はRuntimeと編集ツールで共有できます。
+各オブジェクトには `Id` と
+`Components` を指定でき、`Name` と `Enabled` は省略できます。
+`Transform3D` の `Rotation` は `[x, y, z, w]` のクォータニオンです。
+`ModelRenderer` を付ける場合は `Transform3D` も指定します。
+`ModelRenderer` の `Model` にある相対パスは、ワールド配置JSONのフォルダを基準に解決します。
+
+2Dオブジェクトには `Transform2D` と `SpriteRenderer` を組み合わせます。
+`SpriteRenderer` の `Texture` はワールド配置JSONを基準にした相対パスで指定できます。
+`Pivot` は画像内の基準点で、左上は `[0, 0]`、中央は `[0.5, 0.5]`、右下は `[1, 1]` です。
+省略時は中央になります。`Transform2D` の `Position` にピボットを置き、
+`Scale` はテクスチャ本来のサイズに対する倍率、`Rotation` は時計回りのラジアンです。
+
+## 2Dレベルデータ
+
+`LGF::LevelData2D` はレベル名と2Dオブジェクトの一覧を持ちます。
+1レベルにつき1つのJSONファイルを使い、ゲームと編集ツールで同じ入出力APIを共有できます。
+
+```cpp
+LGF::LevelData2D level;
+const auto loaded = LGF::LoadLevel2D("Assets/LevelDatas/World/Example2D.json", level);
+if (loaded) {
+    const auto saved = LGF::SaveLevel2D("Assets/LevelDatas/World/Example2DCopy.json", level);
+    // 保存に失敗した場合は saved.message で理由を取得できます。
+}
+```
+
+JSONの必須項目は `Version`（現在は `1`）と `Objects` 配列です。
+各オブジェクトの `Id` はレベル内で一意にし、`Type` に用途を示す名前を指定します。
+`Transform` の `Translation` と `Scale` は2要素の配列で、`Rotation` はラジアンです。
+省略した座標と回転角は0、拡大率は `[1, 1]` になります。
+`Name` と `AssetPath` は省略できます。オブジェクトの生成、種別の解釈、
+アセットパスの解決は、読み込んだアプリケーションが行います。
+
+## 画面UIレイアウト
+
+`LaziealLevelEditor` は `UIWorld` の画面用レイアウトを編集します。
+画面UIのJSONには `Type: "UILayout2D"` を保存します。
+Canvas・Panel・Label・Image・Button を階層上で配置し、位置はImGuizmoでも変更できます。
+画像の相対パスはレイアウトJSONのディレクトリを基準に解決されます。
+プレビューでは `UIWorld` がパネル、ボタン、テキスト、画像のスプライトを描画します。
+
+実行ファイルは `generated/outputs/<構成>/x64/LevelEditor` に出力されます。
+`--level-data-directory "<フォルダのパス>"` で、ファイル選択の初期フォルダを指定できます。
+エディタのトップ画面で `UI Edit`、`World Edit`、`Level Preview` を選びます。
+UI配置は `LevelDatas/UI`、2D・3Dのワールド配置は `LevelDatas/World` に置けます。
+ゲーム側では `LoadUILayout2D` でJSONを読み、フォントと画像の読み込み処理を
+`CreateUIWorld2D` に渡すと同じUIWorldを作成できます。
+
 ## 物理粒子
 
 `LGF::Physics::PhysicsWorld`は、GPU上で球形粒子の落下、粒子間衝突、

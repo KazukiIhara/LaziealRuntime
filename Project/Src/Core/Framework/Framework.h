@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include <filesystem>
 #include <memory>
 #include <string>
 #include <string_view>
@@ -8,11 +9,20 @@
 namespace LGF {
 
 	struct RuntimeConfig;
+	struct LevelData;
+	struct LevelIoResult;
+	struct UIHandle;
 	class AudioSystem;
+	class GameObjectWorld;
 	class GraphicsSystem;
 	class InputSystem;
 	class TimeSystem;
+	class UIWorld;
 	class WindowSystem;
+
+	namespace Detail {
+		struct LevelRuntime;
+	}
 
 	/// <summary>
 	/// Runtime層のWindow、Input、Timeと描画フレームワークを接続する。
@@ -25,6 +35,12 @@ namespace LGF {
 		bool Initialize(const RuntimeConfig& config);
 		bool Update();
 		bool Finalize();
+		LevelIoResult SetLevelData(const std::filesystem::path& fileName);
+		void ClearLevelData();
+		const LevelData* GetLevelData() const;
+		UIWorld* GetLevelUIWorld();
+		UIHandle FindLevelUIElement(std::string_view id) const;
+		GameObjectWorld* GetLevelGameObjectWorld();
 
 		double GetDeltaTime() const;
 		bool SetWindowTitle(std::wstring_view title);
@@ -42,6 +58,7 @@ namespace LGF {
 		void EndFrame();
 
 		std::unique_ptr<WindowSystem> windowSystem_;
+		std::unique_ptr<Detail::LevelRuntime> level_;
 		std::unique_ptr<AudioSystem> audioSystem_;
 		std::unique_ptr<GraphicsSystem> graphicsSystem_;
 		std::unique_ptr<InputSystem> inputSystem_;

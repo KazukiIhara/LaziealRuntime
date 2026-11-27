@@ -509,6 +509,13 @@ std::optional<Rect2D> UIWorld::GetButtonRect(UIButtonHandle handle) const {
 		: std::nullopt;
 }
 
+std::optional<Rect2D> UIWorld::GetScreenRect(UIHandle handle) const {
+	const ElementSlot* slot = FindSlot(handle);
+	return slot && slot->space == UICanvasSpace::Screen
+		? std::optional<Rect2D>{ slot->resolvedRect }
+		: std::nullopt;
+}
+
 std::optional<Matrix4x4> UIWorld::GetButtonWorldMatrix(UIButtonHandle handle) const {
 	const ElementSlot* slot = FindSlot(handle);
 	return slot && IsButton(*slot) && slot->space == UICanvasSpace::World
@@ -517,7 +524,12 @@ std::optional<Matrix4x4> UIWorld::GetButtonWorldMatrix(UIButtonHandle handle) co
 }
 
 void UIWorld::Update(const UIWorldInput& input) {
-	ResolveLayout();
+	const Window::Size windowSize = Window::GetSize();
+	Update(input, { static_cast<float>(windowSize.width), static_cast<float>(windowSize.height) });
+}
+
+void UIWorld::Update(const UIWorldInput& input, const Vector2& screenSize) {
+	ResolveLayout(screenSize);
 	if (!SetSelected(selectedButton_)) {
 		selectedButton_ = {};
 	}
@@ -572,13 +584,9 @@ void UIWorld::Update(const UIWorldInput& input) {
 	}
 }
 
-void UIWorld::ResolveLayout() {
+void UIWorld::ResolveLayout(const Vector2& screenSize) {
 	resolvedOrder_.clear();
-	const Window::Size windowSize = Window::GetSize();
-	const Rect2D screenRect{ {}, {
-		static_cast<float>(windowSize.width),
-		static_cast<float>(windowSize.height),
-	} };
+	const Rect2D screenRect{ {}, screenSize };
 	const Matrix4x4 identity = Math::Identity4x4();
 	for (const UIHandle handle : elementOrder_) {
 		const ElementSlot* slot = FindSlot(handle);
