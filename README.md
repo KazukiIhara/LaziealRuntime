@@ -31,6 +31,10 @@ git submodule update --init --recursive
 `generated/outputs/<構成>/x64/ParameterEditor`へ出力されます。
 初回起動時にパラメータディレクトリを選択し、以降は前回選択した場所を使用します。
 ディレクトリはツールバーの`Change...`から変更できます。
+アプリケーションのソリューションから起動するときは、同じプロジェクト定義を
+`Tools/ParameterEditor/premake5.lua`から取り込み、
+`--parameter-directory "<フォルダのパス>"`で編集先を指定できます。
+起動引数で指定したフォルダは前回の選択より優先され、起動時にユーザー設定へ保存されません。
 
 ## 公開API
 

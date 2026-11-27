@@ -8,9 +8,6 @@ workspace "LaziealRuntime"
     objdir "../../generated/obj/%{prj.name}/%{cfg.buildcfg}"
 
 local graphicsProject = "../../Dependencies/LaziealGraphicsFramework/Project"
-local sdlRoot = "../../Dependencies/SDL3"
-local effekseerInstall = graphicsProject .. "/Externals/Effekseer/install_" ..
-    ((_ACTION == "vs2022") and "msvc2022_x64" or "msvc2026_x64")
 
 externalproject "DirectXTex"
     location (graphicsProject)
@@ -84,118 +81,9 @@ project "LaziealRuntime"
 
     filter {}
 
-project "LaziealParameterEditor"
-    kind "WindowedApp"
-    language "C++"
-    cppdialect "C++20"
-    location "../"
-    characterset "Unicode"
-    targetdir "../../generated/outputs/%{cfg.buildcfg}/%{cfg.platform}/ParameterEditor"
-
-    files {
-        "../../Tools/ParameterEditor/**.cpp",
-        "../../Tools/ParameterEditor/**.h",
-        "../../Tools/ParameterEditor/RuntimeSetting.ini",
-    }
-
-    includedirs {
-        "../Include",
-        graphicsProject .. "/Include",
-        graphicsProject .. "/Externals/imgui",
-        graphicsProject .. "/Externals",
-    }
-
-    dependson {
-        "LaziealRuntime",
-        "LaziealGraphicsFramework",
-        "DirectXTex",
-        "DirectXMesh",
-        "ImGui",
-    }
-
-    links {
-        "LaziealRuntime",
-        "LaziealGraphicsFramework",
-        "DirectXTex",
-        "DirectXMesh",
-        "ImGui",
-        "d3d12",
-        "dxgi",
-        "dxguid",
-        "dxcompiler",
-        "winmm",
-        "ole32",
-        "shell32",
-        "SDL3",
-    }
-
-    libdirs {
-        sdlRoot .. "/lib/x64",
-        effekseerInstall .. "/lib",
-    }
-
-    defines { "NOMINMAX" }
-    warnings "High"
-    buildoptions { "/utf-8" }
-    staticruntime "On"
-    multiprocessorcompile "On"
-    debugdir "%{cfg.targetdir}"
-
-    postbuildcommands {
-        'copy "$(WindowsSdkDir)bin\\$(TargetPlatformVersion)\\x64\\dxcompiler.dll" "$(TargetDir)dxcompiler.dll"',
-        'copy "$(WindowsSdkDir)bin\\$(TargetPlatformVersion)\\x64\\dxil.dll" "$(TargetDir)dxil.dll"',
-        'copy /Y "$(ProjectDir)..\\Dependencies\\SDL3\\lib\\x64\\SDL3.dll" "$(TargetDir)SDL3.dll"',
-        'copy /Y "$(ProjectDir)..\\Tools\\ParameterEditor\\RuntimeSetting.ini" "$(TargetDir)RuntimeSetting.ini"',
-        'xcopy /E /I /Y /D "$(ProjectDir)..\\Dependencies\\LaziealGraphicsFramework\\Project\\Assets" "$(TargetDir)Assets\\Framework"'
-    }
-
-    filter "configurations:Debug"
-        defines { "DEBUG" }
-        symbols "On"
-        debugformat "C7"
-        fatalwarnings { "All" }
-        runtime "Debug"
-        linkoptions { "/IGNORE:4049", "/IGNORE:4099" }
-        libdirs { graphicsProject .. "/Externals/assimp/lib/Debug" }
-        links { "assimp-vc143-mtd" }
-        links {
-            "EffekseerRendererDX12d",
-            "EffekseerRendererLLGId",
-            "EffekseerRendererCommond",
-            "Effekseerd",
-            "LLGId",
-        }
-
-    filter "configurations:Develop"
-        defines { "DEBUG", "DEVELOP" }
-        symbols "On"
-        debugformat "C7"
-        optimize "Debug"
-        runtime "Release"
-        linkoptions { "/IGNORE:4049", "/IGNORE:4099" }
-        libdirs { graphicsProject .. "/Externals/assimp/lib/Release" }
-        links { "assimp-vc143-mt" }
-        links {
-            "EffekseerRendererDX12",
-            "EffekseerRendererLLGI",
-            "EffekseerRendererCommon",
-            "Effekseer",
-            "LLGI",
-        }
-
-    filter "configurations:Release"
-        defines { "NDEBUG" }
-        optimize "On"
-        runtime "Release"
-        linkoptions { "/IGNORE:4049", "/IGNORE:4099" }
-        libdirs { graphicsProject .. "/Externals/assimp/lib/Release" }
-        links { "assimp-vc143-mt" }
-        links {
-            "EffekseerRendererDX12",
-            "EffekseerRendererLLGI",
-            "EffekseerRendererCommon",
-            "Effekseer",
-            "LLGI",
-        }
-
-    filter {}
+local runtimeDirectory = path.getabsolute("../..")
+local defineParameterEditor = dofile(runtimeDirectory .. "/Tools/ParameterEditor/premake5.lua")
+defineParameterEditor(
+    runtimeDirectory,
+    path.getabsolute(".."),
+    "../../generated/outputs/%{cfg.buildcfg}/%{cfg.platform}")

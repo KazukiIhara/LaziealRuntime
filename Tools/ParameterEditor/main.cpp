@@ -1,4 +1,5 @@
 #include <Windows.h>
+#include <shellapi.h>
 #include <ShlObj.h>
 #include <shobjidl.h>
 
@@ -12,6 +13,7 @@
 #include <fstream>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <type_traits>
 #include <utility>
 #include <vector>
@@ -25,6 +27,11 @@ namespace {
 	using Json = nlohmann::json;
 
 	constexpr std::string_view kParameterDirectoryKey = "parameterDirectory";
+
+	std::string GetPathText(const std::filesystem::path& path) {
+		const std::u8string text = path.u8string();
+		return std::string(reinterpret_cast<const char*>(text.data()), text.size());
+	}
 
 	std::filesystem::path GetPreferencesFilePath() {
 		PWSTR localAppDataPath = nullptr;
@@ -63,8 +70,8 @@ namespace {
 				return std::nullopt;
 			}
 
-			const std::filesystem::path directory =
-				preferences.at(kParameterDirectoryKey).get<std::string>();
+			const std::string pathText = preferences.at(kParameterDirectoryKey).get<std::string>();
+			const std::filesystem::path directory(std::u8string(pathText.begin(), pathText.end()));
 			std::error_code error;
 			if (!std::filesystem::is_directory(directory, error)) {
 				return std::nullopt;
@@ -93,7 +100,7 @@ namespace {
 		}
 
 		const Json preferences{
-			{ kParameterDirectoryKey, directory.string() }
+			{ kParameterDirectoryKey, GetPathText(directory) }
 		};
 		file << preferences.dump(4) << '\n';
 		return file.good();
@@ -245,7 +252,7 @@ namespace {
 			}
 			currentFile_ = filePath;
 			selectedParameter_.clear();
-			SetStatus("Loaded " + filePath.filename().string() + '.');
+			SetStatus("Loaded " + GetPathText(filePath.filename()) + '.');
 		}
 
 		void Save() {
@@ -260,7 +267,7 @@ namespace {
 				return;
 			}
 			isDirty_ = false;
-			SetStatus("Saved " + currentFile_.filename().string() + '.');
+			SetStatus("Saved " + GetPathText(currentFile_.filename()) + '.');
 			RefreshFiles();
 		}
 
@@ -313,7 +320,7 @@ namespace {
 				ImGui::TableNextRow();
 
 				ImGui::TableSetColumnIndex(0);
-				ImGui::TextUnformatted(parameterDirectory_.string().c_str());
+				ImGui::TextUnformatted(GetPathText(parameterDirectory_).c_str());
 
 				ImGui::TableSetColumnIndex(1);
 				if (ImGui::Button("Change...", ImVec2(-1.0f, 0.0f))) {
@@ -375,7 +382,7 @@ namespace {
 			ImGui::SeparatorText("Parameter files");
 			for (const std::filesystem::path& file : files_) {
 				const bool selected = file == currentFile_;
-				if (ImGui::Selectable(file.filename().string().c_str(), selected)) {
+				if (ImGui::Selectable(GetPathText(file.filename()).c_str(), selected)) {
 					Open(file);
 				}
 			}
@@ -396,7 +403,7 @@ namespace {
 				return;
 			}
 
-			ImGui::Text("%s%s", currentFile_.string().c_str(), isDirty_ ? " *" : "");
+			ImGui::Text("%s%s", GetPathText(currentFile_).c_str(), isDirty_ ? " *" : "");
 			DrawAddParameter();
 			ImGui::Separator();
 
@@ -587,6 +594,39 @@ void Main() {
 }
 
 int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
+	int argumentCount = 0;
+	LPWSTR* arguments = CommandLineToArgvW(GetCommandLineW(), &argumentCount);
+	if (!arguments) {
+		return EXIT_FAILURE;
+	}
+
+	std::optional<std::filesystem::path> parameterDirectory;
+	if (argumentCount == 3 && std::wstring_view(arguments[1]) == L"--parameter-directory" && arguments[2][0] != L'\0') {
+		parameterDirectory.emplace(arguments[2]);
+	}
+	LocalFree(arguments);
+
+	if (argumentCount != 1 && !parameterDirectory) {
+		MessageBoxW(
+			nullptr,
+			L"Usage: LaziealParameterEditor.exe [--parameter-directory <folder>]",
+			L"Lazieal Parameter Editor",
+			MB_OK | MB_ICONERROR);
+		return EXIT_FAILURE;
+	}
+
+	// 相対パスは、エディタが作業ディレクトリを変更する前に解決する。
+	if (parameterDirectory) {
+		std::error_code error;
+		const std::filesystem::path directory = std::filesystem::absolute(*parameterDirectory, error);
+		if (error || !std::filesystem::is_directory(directory, error)) {
+			const std::wstring message = L"Parameter directory was not found.\n\n" + parameterDirectory->wstring();
+			MessageBoxW(nullptr, message.c_str(), L"Lazieal Parameter Editor", MB_OK | MB_ICONERROR);
+			return EXIT_FAILURE;
+		}
+		parameterDirectory = directory;
+	}
+
 	const HRESULT comInitialization = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
 	if (FAILED(comInitialization)) {
 		return EXIT_FAILURE;
@@ -620,7 +660,9 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
 		return EXIT_FAILURE;
 	}
 
-	std::optional<std::filesystem::path> parameterDirectory = LoadParameterDirectory();
+	if (!parameterDirectory) {
+		parameterDirectory = LoadParameterDirectory();
+	}
 	if (!parameterDirectory) {
 		parameterDirectory = SelectParameterDirectory(nullptr);
 		if (!parameterDirectory) {

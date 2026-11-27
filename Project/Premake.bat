@@ -2,13 +2,8 @@
 setlocal
 cd /d "%~dp0"
 
-pushd "..\Dependencies\LaziealGraphicsFramework\Project\Premake"
-premake5.exe vs2026
-if errorlevel 1 (
-    popd
-    exit /b 1
-)
-popd
+call "..\Dependencies\LaziealGraphicsFramework\Project\Premake.bat"
+if errorlevel 1 exit /b 1
 
 pushd "Premake"
 premake5.exe vs2026
